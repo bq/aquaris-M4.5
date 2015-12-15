@@ -1,0 +1,5 @@
+config SMART_TFA9897
+    bool "SMART_TFA9897"
+    default n
+    help
+        If you say Y, enable CONFIG_MTK_SOUND.

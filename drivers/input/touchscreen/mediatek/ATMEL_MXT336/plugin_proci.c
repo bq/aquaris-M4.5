@@ -41,6 +41,11 @@ fixed some bugs
 
 #include "plug.h"
 #include <linux/delay.h>
+   
+/********swf add start for vibrator 20150703*********/
+#include <cust_vibrator.h>
+#include <vibrator_hal.h>
+/********swf add end   for vibrator 20150703*********/
 
 #define PI_FLAG_RESUME					(1<<0)
 #define PI_FLAG_RESETING				(1<<1)
@@ -292,6 +297,12 @@ static int plugin_proci_pi_hook_t93(void *pi_id, u8 *msg, unsigned long pl_flag)
 	//struct pi_observer *obs = (struct pi_observer *)p->obs;
 	int state = msg[1] & 0x83;
 	int idx = -EINVAL;
+
+/*****LC--swf--add--start--20150703 add vibrator when tp doubel click  */
+		vibr_Enable_HW();
+		mdelay(50);
+		vibr_Disable_HW();
+/*****LC--swf--add--end-- 20150703 add vibrator when tp doubel click  */
 
 	if (!test_flag(PL_FUNCTION_FLAG_WAKEUP_GESTURE,&pl_flag))
 		return -EINVAL;

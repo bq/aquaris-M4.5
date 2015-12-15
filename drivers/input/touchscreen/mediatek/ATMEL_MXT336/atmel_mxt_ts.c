@@ -141,6 +141,7 @@
 static struct task_struct *esd_thread = NULL;  //swf55
 static DECLARE_WAIT_QUEUE_HEAD(esd_waiter);//zbl add
 //static struct mxt_data  *waitful_data = NULL; //swf add 0228
+extern int ltr559_get_ps_value_for_double_tap(void); //swft93
 
 static u8 suspend_flag = 0;
 static write_data_to_read(struct mxt_data *data); 
@@ -2374,6 +2375,10 @@ static void mxt_proc_T93_messages(struct mxt_data *data, u8 *msg)
 
 	/* do not report events if input device not yet registered */
 	if (test_bit(MXT_WK_ENABLE,&data->enable_wakeup)) {
+ /*swf 20150910 add start for proximity sensor is covered when double tap */
+                if(ltr559_get_ps_value_for_double_tap()) //swft93
+                      return 0;
+ /*swf 20150910 end start for proximity sensor is covered when double tap */
 		ret = mxt_proc_gesture_messages(data, MXT_PROCI_TOUCHSEQUENCELOGGER_T93,
 			T93_KEY, msg);
 		if (!ret)
@@ -5715,24 +5720,27 @@ static write_data_to_read(struct mxt_data *data)  //swfesd
 #ifdef __LCT_ADD_TP_VERSION__
 //static struct proc_dir_entry *g_ctp_proc = NULL;
 //static struct proc_dir_entry *g_ctp_vender = NULL;
-static u32 version=0;
+static u32 fw_version=0;
+//static char tp_version_final[20] = {0};
+static char *tp_vendor; //[20] = {1};//swf add for *#87#
+static char tp_version_temp[10] = "Goworld";//{0};
 
 static int ctp_proc_open_show (struct seq_file* m, void* data)
 {
     char temp[30] = {0};
     int cnt = 0;
 
-    cnt = sprintf(temp, "pid:0x%06X\n",version);
+    cnt = sprintf(temp, "pid:0x%06x\n",fw_version);
     seq_printf(m, "%s\n", temp);
     return 0;
 
 }
 static int ctp_vender_open_show (struct seq_file* m, void* data)
 {
-    char temp[30] = {0};
+    char temp[60] = {0};
     int cnt = 0;
 
-    cnt = sprintf(temp, "MXT336[ATMEL],HW:0x%6X\n",version);
+    cnt = sprintf(temp, "[Vendor]%s,[fw]0x%06x,[ic]ATMEL\n",tp_version_temp,fw_version);
     seq_printf(m, "%s\n", temp);
     return 0;
 }
@@ -5758,23 +5766,32 @@ static const struct file_operations ctp_vender_fops = {
 //LC--zbl--add--20150520 for  kernel3.1 proc node end
 static void tp_devinfo_init(struct mxt_data *data)
 {
-	static char crc_info[50];//={0};
-	//memset(crc_info, 0, sizeof(crc_info));
-	//strcpy(crc_info,data->config_crc); 
-        version = data->config_crc;//LC--zbl--add--20150520 for proc node
+	static char crc_info[50] = {0};
+        static char version_info[20] = {0};
+	//static char *tp_buf=NULL;
+
+       // tp_vendor = data->cfg_name;//swf add for *#87#
 	sprintf(crc_info, "0x%06X",data->config_crc);
 	LCSH_DEBUG("swf77777 crc_info=0x%07X \n",data->config_crc);
 
+	sprintf(version_info, "%u%u",data->info->version >> 4, data->info->version & 0xf);
+	//sprintf(tp_version_final, "%s",version_info);
+        fw_version = (data->info->version | (data->info->version & 0xf));
+#if 0
+if (!strncmp(tp_vendor, "A4_15_2.2_AA.raw.01", 19) & !strncmp(tp_vendor, "A4_15_2.2_AA.raw.02", 19) & !strncmp(tp_vendor, "A4_15_2.2_AA.raw.05", 19) & !strncmp(tp_vendor, "A4_15_2.2_AA.raw.06", 19))
+   	sprintf(tp_version_temp, "%s","xinli");     
+else
+	sprintf(tp_version_temp, "%s","Goworld");  
+#endif
 	static struct devinfo_struct *devinfo_tp = NULL;
 	devinfo_tp = kzalloc(sizeof(struct devinfo_struct), GFP_KERNEL);    
 	if(NULL != devinfo_tp)
 	{
 		devinfo_tp->device_type = "TP";
-		devinfo_tp->device_module = "ATMEL";
-        // devinfo_tp->device_vendor = "truly";
-		devinfo_tp->device_vendor = data->cfg_name;
-		devinfo_tp->device_ic = "mxt336 ";
-		devinfo_tp->device_version = crc_info;
+		devinfo_tp->device_module = crc_info;
+		devinfo_tp->device_vendor = "Goworld";//tp_version_temp;
+		devinfo_tp->device_ic = "atmel ";
+		devinfo_tp->device_version = version_info;
 		devinfo_tp->device_info = "960*540";
 		devinfo_tp->device_used = DEVINFO_USED;
 		devinfo_check_add_device(devinfo_tp);
@@ -5932,7 +5949,7 @@ LCSH_DEBUG("*****sunwf111111 func = %s line = %d ******\n",__func__,__LINE__);
 #endif
 
 #if defined(CONFIG_TP_DEVICE_INFO_SUPORT)
-	//tp_devinfo_init(data);
+	tp_devinfo_init(data);
 //LC--zbl--add--20150520 for kernel3.1 proc node start
 #ifdef __LCT_ADD_TP_VERSION__
 	if(proc_create("tp_info", 0444, NULL, &tp_info_fops) == NULL)

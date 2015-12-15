@@ -62,6 +62,7 @@ extern unsigned int ddp_ovl_get_cur_addr(bool rdma_mode, int layerid );
 extern unsigned int ddp_wdma_get_cur_addr(void);
 extern void rdma_get_address(DISP_MODULE_ENUM module, unsigned long * data);
 unsigned int is_hwc_enabled = 0;
+static int is_hwc_update_frame;
 unsigned int gEnableLowPowerFeature = 0;
 extern 	int is_DAL_Enabled(void);
 extern int dprec_mmp_dump_ovl_layer(void* ovl_layer,unsigned int l,unsigned int ovl_idx);
@@ -686,7 +687,7 @@ static int _disp_primary_path_idle_detect_thread(void* data)
 		msleep(idle_time);
 		//DISPMSG("[ddp_idle]_disp_primary_path_idle_detect start 1\n");
 
-		if(gSkipIdleDetect || atomic_read(&isDdp_Idle)==1)  // skip is already in idle mode
+		if(gSkipIdleDetect || atomic_read(&isDdp_Idle)==1 || is_hwc_update_frame == 0)  // skip is already in idle mode
 		{
             continue;
 		}
@@ -1707,11 +1708,7 @@ static void _cmdq_build_trigger_loop(void)
 		// wait and clear stream_done, HW will assert mutex enable automatically in frame done reset.
 		// todo: should let dpmanager to decide wait which mutex's eof.
 
-		if(gEnableMutexRisingEdge==1)
-        {
-            ret = cmdqRecWait(pgc->cmdq_handle_trigger, CMDQ_EVENT_DISP_RDMA0_EOF);
-        }
-
+		ret = cmdqRecWait(pgc->cmdq_handle_trigger, CMDQ_EVENT_DISP_RDMA0_EOF);
 		ret = cmdqRecWait(pgc->cmdq_handle_trigger, dpmgr_path_get_mutex(pgc->dpmgr_handle) + CMDQ_EVENT_MUTEX0_STREAM_EOF);
 
         if(gEnableSWTrigger==1)
@@ -3212,7 +3209,7 @@ int _trigger_display_interface(int blocking, void *callback, unsigned int userda
 		    disp_set_sodi(1, pgc->cmdq_handle_config);
 		}
 
-		if(gEnableMutexRisingEdge==1 && primary_display_is_video_mode()==1)
+		if(primary_display_is_video_mode()==1)
 		{
 		     cmdqRecWaitNoClear(pgc->cmdq_handle_config, CMDQ_EVENT_DISP_RDMA0_EOF);
 		}
@@ -3452,14 +3449,15 @@ int _esd_check_config_handle_vdo(void)
 	int ret = 0; // 0:success , 1:fail
 	primary_display_esd_cust_bycmdq(1);
 
+#if defined(MTK_FB_SODI_SUPPORT) || !defined(CONFIG_FPGA_EARLY_PORTING)
+	spm_enable_sodi(0);
+#endif
+
 	// 1.reset
 	cmdqRecReset(pgc->cmdq_handle_config_esd);
 
 	// wait stream eof first
-	if(gEnableMutexRisingEdge==1)
-	{
-		ret = cmdqRecWait(pgc->cmdq_handle_config_esd, CMDQ_EVENT_DISP_RDMA0_EOF);
-	}
+	cmdqRecWait(pgc->cmdq_handle_config_esd, CMDQ_EVENT_DISP_RDMA0_EOF);
 	cmdqRecWait(pgc->cmdq_handle_config_esd, CMDQ_EVENT_MUTEX0_STREAM_EOF);
 
 #ifdef DISP_DUMP_EVENT_STATUS
@@ -3467,16 +3465,16 @@ int _esd_check_config_handle_vdo(void)
     cmdqRecBackupRegisterToSlot(pgc->cmdq_handle_config_esd, pgc->event_status, 1, DISP_REG_CMDQ_TOKEN_VALUE);
 #endif
 
-  // disable SODI by CMDQ
-  if(gESDEnableSODI==1)
-	    disp_set_sodi(0, pgc->cmdq_handle_config_esd);
-
 	_primary_path_lock(__func__);
 	// 2.stop dsi vdo mode
 	dpmgr_path_build_cmdq(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd,CMDQ_STOP_VDO_MODE);
 
 	// 3.write instruction(read from lcm)
 	dpmgr_path_build_cmdq(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd,CMDQ_ESD_CHECK_READ);
+	
+	/* pull DSI clock lane */
+	DSI_sw_clk_trail_cmdq(0, pgc->cmdq_handle_config_esd);
+	DSI_manual_enter_HS(pgc->cmdq_handle_config_esd);
 
 	// 4.start dsi vdo mode
 	dpmgr_path_build_cmdq(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd,CMDQ_START_VDO_MODE);
@@ -3491,10 +3489,6 @@ int _esd_check_config_handle_vdo(void)
 
 	dpmgr_path_trigger(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd, CMDQ_ENABLE);
 
-  // enable SODI by  CMDQ
-  if(gESDEnableSODI==1)
-      disp_set_sodi(1, pgc->cmdq_handle_config_esd);
-
 	// 6.flush instruction
 	dprec_logger_start(DPREC_LOGGER_ESD_CMDQ, 0, 0);
 
@@ -3506,6 +3500,10 @@ int _esd_check_config_handle_vdo(void)
 
 	_primary_path_unlock(__func__);
 	ret = cmdqRecFlush(pgc->cmdq_handle_config_esd);
+
+#if defined(MTK_FB_SODI_SUPPORT) || !defined(CONFIG_FPGA_EARLY_PORTING)
+	spm_enable_sodi(1);
+#endif
 
 #ifdef DISP_DUMP_EVENT_STATUS
     {
@@ -3665,6 +3663,55 @@ int primary_display_esd_check(void)
         if(primary_display_is_video_mode())
         {
         	primary_display_switch_esd_mode(1);
+
+			/* use cmdq to pull DSI clk lane*/
+			if(primary_display_cmdq_enabled() ){
+				_primary_path_lock(__func__);
+
+				/* 0.create esd check cmdq */
+				cmdqRecCreate(CMDQ_SCENARIO_DISP_ESD_CHECK,&(pgc->cmdq_handle_config_esd));
+				_primary_path_unlock(__func__);
+
+				primary_display_esd_cust_bycmdq(1);
+
+				/* 1.reset*/
+				cmdqRecReset(pgc->cmdq_handle_config_esd);
+
+				/* wait stream eof first */
+				ret = cmdqRecWait(pgc->cmdq_handle_config_esd, CMDQ_EVENT_DISP_RDMA0_EOF);
+				
+				cmdqRecWait(pgc->cmdq_handle_config_esd, CMDQ_EVENT_MUTEX0_STREAM_EOF);
+
+				_primary_path_lock(__func__);
+				/* 2.stop dsi vdo mode */
+				dpmgr_path_build_cmdq(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd,CMDQ_STOP_VDO_MODE);
+
+				/* 3.pull DSI clock lane */
+				DSI_sw_clk_trail_cmdq(0, pgc->cmdq_handle_config_esd);
+				DSI_manual_enter_HS(pgc->cmdq_handle_config_esd);
+
+
+				/* 4.start dsi vdo mode */
+				dpmgr_path_build_cmdq(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd,CMDQ_START_VDO_MODE);
+
+				/* 5. trigger path */
+				cmdqRecClearEventToken(pgc->cmdq_handle_config_esd ,CMDQ_EVENT_MUTEX0_STREAM_EOF);
+
+				if (gEnableSWTrigger==1){
+					DISP_REG_SET(pgc->cmdq_handle_config_esd, DISP_REG_CONFIG_MUTEX_EN(DISP_OVL_SEPARATE_MUTEX_ID), 1);
+				}
+
+				dpmgr_path_trigger(pgc->dpmgr_handle, pgc->cmdq_handle_config_esd, CMDQ_ENABLE);
+
+				_primary_path_unlock(__func__);
+				cmdqRecFlush(pgc->cmdq_handle_config_esd);
+
+				primary_display_esd_cust_bycmdq(0);
+
+				cmdqRecDestroy(pgc->cmdq_handle_config_esd);
+				pgc->cmdq_handle_config_esd = NULL;
+			}
+
             if(_need_register_eint())
             {
                 MMProfileLogEx(ddp_mmp_get_events()->esd_extte, MMProfileFlagPulse, 1, 1);
@@ -3863,7 +3910,7 @@ static int primary_display_esd_check_worker_kthread(void *data)
 		    count++;
 			msleep(3000);
 		}
-        msleep(2000); // esd check every 2s
+        msleep(2000); // esd check/pull clock lane every 2s
 		ret = wait_event_interruptible(esd_check_task_wq,atomic_read(&esd_check_task_wakeup));
         if(ret < 0)
         {
@@ -5642,7 +5689,8 @@ int primary_suspend_clr_ovl_config(void)
 	data_config = dpmgr_path_get_last_config(handle);
 	memset((void*)&(data_config->ovl_config), 0, sizeof(ovl_config));
 	last_primary_config = *data_config;
-	
+	is_hwc_update_frame = 1;
+
 	for(i = 0; i < OVL_LAYER_NUM; i++)
 		ovl_layer_switch(DISP_MODULE_OVL0, i, 0, NULL);	
 
@@ -5892,6 +5940,14 @@ int primary_display_resume(void)
 	  pgc->state = DISP_ALIVE;
 	  goto done;
 	}
+
+	if (primary_display_is_video_mode())
+	{
+		DISPCHECK("mutex0 clear[begin]\n");
+		ddp_mutex_clear(0, NULL);
+		DISPCHECK("mutex0 clear[end]\n");
+	}
+
 	DISPCHECK("[POWER]dpmanager re-init[begin]\n");
 
 	{
@@ -6826,6 +6882,7 @@ static int _config_ovl_input(disp_session_input_config *session_input,
 	if (DISP_SESSION_TYPE(session_input->session_id) == DISP_SESSION_PRIMARY)
 	{
 		last_primary_config = *data_config;
+		is_hwc_update_frame = 1;
 	}
 
 	return ret;

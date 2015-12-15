@@ -2465,16 +2465,19 @@ static int md_cd_send_runtime_data(struct ccci_modem *md, unsigned int sbp_code)
 #ifdef FEATURE_C2K_ALWAYS_ON
     runtime->support_mask |= (FEATURE_SUPPORT<<(MISC_MD_C2K_ON*2));
     runtime->feature_7_val[0] = 
-        ( 0
-    #ifdef CONFIG_MTK_C2K_SUPPORT
+        (0
+#ifdef CONFIG_MTK_C2K_SUPPORT
         | (1<<0)
-    #endif
-    #ifdef CONFIG_MTK_SVLTE_SUPPORT
+#endif
+#ifdef CONFIG_MTK_SVLTE_SUPPORT
         | (1<<1)
-    #endif
-		#ifdef CONFIG_MTK_SRLTE_SUPPORT
+#endif
+#ifdef CONFIG_MTK_SRLTE_SUPPORT
         | (1<<2)
-		#endif
+#endif
+#ifdef CONFIG_MTK_C2K_OM_SOLUTION1
+        | (1<<3)
+#endif
         );
 #endif
 

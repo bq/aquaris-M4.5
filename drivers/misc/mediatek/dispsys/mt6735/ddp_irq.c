@@ -433,6 +433,10 @@ irqreturn_t disp_irq_handler(int irq, void *dev_id)
                     DDPERR("IRQ: WDMA%d underrun! cnt=%d\n",index,cnt_wdma_underflow[index]++);
                     disp_irq_log_module |= 1<<module;
                 }
+                if(reg_val&(1<<2))
+                {
+                    DDPERR("IRQ: WDMA%d FIFO full!\n", index);
+                }
                 //clear intr
                 DISP_CPU_REG_SET(DISP_REG_WDMA_INTSTA+index*DISP_WDMA_INDEX_OFFSET,~reg_val);
                 MMProfileLogEx(ddp_mmp_get_events()->WDMA_IRQ[index], MMProfileFlagPulse, reg_val, DISP_REG_GET(DISP_REG_WDMA_CLIP_SIZE));

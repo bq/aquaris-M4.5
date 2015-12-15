@@ -131,7 +131,7 @@ struct ccmni_ccci_ops sdio_ccmni_ops = {
 	.ccmni_ver			= CCMNI_DRV_V0,	//CCMNI_DRV_VER
 	.ccmni_num			= CCMNI_INTF_COUNT,
 	.name				= "cc3mni",  //"ccmni" or "cc2mni" or "ccemni"
-#if defined (CONFIG_MTK_IRAT_SUPPORT) && defined (CONFIG_MTK_MD_IRAT_SUPPORT)
+#if defined (CONFIG_MTK_IRAT_SUPPORT)
 	.md_ability			= MODEM_CAP_CCMNI_IRAT | MODEM_CAP_TXBUSY_STOP,
 	.irat_md_id			= MD_SYS1,
 #else

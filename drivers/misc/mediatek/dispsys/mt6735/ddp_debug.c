@@ -99,7 +99,7 @@ unsigned int gPrefetchControl = 0;
 // enable it when use UART to grab log
 unsigned int gEnableUartLog = 0;
 // mutex SOF at raing edge of vsync, can save more time for cmdq config
-unsigned int gEnableMutexRisingEdge = 1; 
+unsigned int gEnableMutexRisingEdge = 0;
 // only write dirty register, reduce register number write by cmdq
 unsigned int gEnableReduceRegWrite = 0;
 

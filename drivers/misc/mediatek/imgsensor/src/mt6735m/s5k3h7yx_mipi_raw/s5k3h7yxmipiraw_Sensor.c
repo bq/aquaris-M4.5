@@ -52,11 +52,21 @@ static DEFINE_SPINLOCK(imgsensor_drv_lock);
 /****************otp*******************///zqiang add
 #define S5K3H7YX_OTP_SUPPORT
 #ifdef S5K3H7YX_OTP_SUPPORT
+
 extern bool otp_update();
 extern BYTE get_otp_module_id(BYTE zone);
 extern bool wb_gain_set();
 bool my_otp_flag=0 ;
+
+extern bool ofilm_otp_update();
+//extern BYTE get_otp_module_id(BYTE zone);
+extern bool ofilm_wb_gain_set();
+bool ofilm_otp_flag=0 ;
 #endif
+
+
+
+
 #define S5K3H7Y_PV_PERIOD_PIXEL_NUMS 3688
 #define S5K3H7Y_PV_PERIOD_LINE_NUMS 2530
 /****************end*******************/
@@ -159,7 +169,7 @@ static imgsensor_info_struct imgsensor_info = {
 	.sensor_output_dataformat = SENSOR_OUTPUT_FORMAT_RAW_Gr,
 	.mclk = 24,
 	.mipi_lane_num = SENSOR_MIPI_4_LANE,
-	.i2c_addr_table = {0x20, 0x5A, 0xff},
+	.i2c_addr_table = {0x5A,0x20,0xff},
 };
 
 
@@ -1760,10 +1770,16 @@ write_cmos_sensor(0x301C, 0x0100); // smiaRegs_vendor_gras_nvm_address
 	   
 	  mdelay(20);
 #ifdef S5K3H7YX_OTP_SUPPORT
-	  if(my_otp_flag == 1){
+	
+	    if(my_otp_flag == 1){
     	  	wb_gain_set();
-		printk("*****update otp*******");		
-}
+		//printk("*****update otp*******");		
+		}
+
+	  if(ofilm_otp_flag == 1){
+    	  	ofilm_wb_gain_set();
+		//printk("*****ofilm update otp*******");		
+		}
 #endif 
 	  mdelay(20);
 	  LOG_INF("exit init\n");
@@ -2174,14 +2190,17 @@ static kal_uint32 open(void)
 	sensor_init();
 	
 	#ifdef S5K3H7YX_OTP_SUPPORT
-	  if(my_otp_flag==0)
+	  if((my_otp_flag || ofilm_otp_flag)==0)
 	{
 		write_cmos_sensor_8(0x0100,0x01);
 		mdelay(50);
-		printk("**********enter otp update********\n");		
-		otp_ok=otp_update();
+		//printk("**********enter otp update********\n");	
+		otp_ok = otp_update();
 		if(otp_ok)
 		my_otp_flag=1;
+		otp_ok=ofilm_otp_update();
+		if(otp_ok)
+		ofilm_otp_flag=1;
 		write_cmos_sensor_8(0x0100,0x00);
 	}
 	#endif 

@@ -49,3 +49,7 @@ endif
 ifeq ($(CONFIG_MTK_ST480),y)
 obj-y   +=  st480/
 endif
+
+ifeq ($(CONFIG_MTK_MMC3524X),y)
+obj-y   +=  mmc3524x/
+endif

@@ -1,5 +1,5 @@
 /*****************************************************************************
- *
+ *  
  * Filename: 
  * ---------
  *    battery_common.c
@@ -16,7 +16,7 @@
  * Author:
  * -------
  * Oscar Liu
- *
+ * 
  ****************************************************************************/
 #include <linux/init.h>		/* For init/exit macros */
 #include <linux/module.h>	/* For MODULE_ marcros  */
@@ -1984,10 +1984,26 @@ void mt_battery_GetBatteryData(void)
 	    mt_battery_average_method(BATTERY_AVG_CURRENT, &batteryCurrentBuffer[0], ICharging, &icharging_sum,
 				      batteryIndex);
 
+	if (previous_SOC == -1 && bat_vol <= V_0PERCENT_TRACKING) {
+		previous_SOC = 0;
+		if (ZCV != 0) {
+			battery_log(BAT_LOG_CRTI,
+					    "battery voltage too low, use ZCV to init average data.\n");
+			BMT_status.bat_vol =
+			    mt_battery_average_method(BATTERY_AVG_VOLT, &batteryVoltageBuffer[0], ZCV, &bat_sum,
+						      batteryIndex);
+		} else {
+			battery_log(BAT_LOG_CRTI,
+					    "battery voltage too low, use V_0PERCENT_TRACKING + 100 to init average data.\n");
+			BMT_status.bat_vol =
+			    mt_battery_average_method(BATTERY_AVG_VOLT, &batteryVoltageBuffer[0], V_0PERCENT_TRACKING + 100, &bat_sum,
+						      batteryIndex);
+		}
+	} else {
 	BMT_status.bat_vol =
 	    mt_battery_average_method(BATTERY_AVG_VOLT, &batteryVoltageBuffer[0], bat_vol, &bat_sum,
 				      batteryIndex);
-
+	}
 	BMT_status.temperature =
 	    mt_battery_average_method(BATTERY_AVG_TEMP, &batteryTempBuffer[0], temperature, &temperature_sum,
 				      batteryIndex);

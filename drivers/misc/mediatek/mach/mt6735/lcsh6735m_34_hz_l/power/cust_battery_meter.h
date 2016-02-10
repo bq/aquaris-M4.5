@@ -8,7 +8,7 @@
 // ============================================================
 //#define SOC_BY_AUXADC
 #define SOC_BY_HW_FG
-//#define HW_FG_FORCE_USE_SW_OCV	/LC--zbl--rm--for keep with 64bit
+//#define HW_FG_FORCE_USE_SW_OCV	//LC--zbl--rm--for keep with 64bit
 //#define SOC_BY_SW_FG
 
 #define DISABLE_RFG_EXIST_CHECK //zbl add for percentage jump
@@ -97,7 +97,7 @@
 #define DIFFERENCE_HWOCV_VBAT		30
 
 /* fg 1.0 */
-#define CUST_POWERON_DELTA_CAPACITY_TOLRANCE	40
+#define CUST_POWERON_DELTA_CAPACITY_TOLRANCE	30 //LC-zbl-modify-20151017-for fix init percentage
 #define CUST_POWERON_LOW_CAPACITY_TOLRANCE		5
 #define CUST_POWERON_MAX_VBAT_TOLRANCE			90
 #define CUST_POWERON_DELTA_VBAT_TOLRANCE		30

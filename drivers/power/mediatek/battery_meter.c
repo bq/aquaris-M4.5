@@ -1417,13 +1417,15 @@ void dod_init(void)
 	sprintf(doddbg,"rtc:%d hwocv:(%d:%d) swocv:(%d,%d) battery_remove:%d %d %d %d",g_rtc_fg_soc,gFG_voltage,gFG_capacity_by_v,gFG_voltage_init,gFG_capacity_by_v_init,is_battery_remove_pmic(),
 	CUST_POWERON_DELTA_CAPACITY_TOLRANCE,CUST_POWERON_LOW_CAPACITY_TOLRANCE,CUST_POWERON_DELTA_HW_SW_OCV_CAPACITY_TOLRANCE);
 
-///LC--zbl--rm--for keep with 64bit
+//LC-zbl-modify-20151017-for fix init percentage
+/*
 		if(is_battery_remove_pmic()==0 && (g_rtc_fg_soc != 0))
 		{
 			bm_print(BM_LOG_CRTI, "[FGADC]is_battery_remove()==0 , use rtc_fg_soc%d\n",g_rtc_fg_soc);
 			gFG_capacity_by_v = g_rtc_fg_soc;
 		}
 		else
+*/
 		{
 
 #if defined(INIT_SOC_BY_SW_SOC)

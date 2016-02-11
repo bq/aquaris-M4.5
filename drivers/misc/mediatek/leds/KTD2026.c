@@ -11,7 +11,7 @@
 #include <asm/errno.h> 
 #include <linux/cdev.h>
 #include <mach/mt_gpio.h>
-
+#include <linux/delay.h>
 
 #define KTD_I2C_NAME			"ktd2026"
 #define KTD_I2C_ADDR			0x30
@@ -50,15 +50,16 @@ void ktd22xx_lowbattery_breath_leds_red(u8 val){
 	 */
 	conf |= 0x02; 
 	printk("[LED] red blink 0x04 value is 0x%2x.\n",conf);
-	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);// mode set---IC work when both SCL and SDA goes high and normal speed
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, 0x00);// initialization LED off
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);// mode set---IC work when both SCL and SDA goes high and normal speed
 	//i2c_smbus_write_byte_data(ktd20xx_client, 0x06, 0x4f);//set current is 10mA
-    i2c_smbus_write_byte_data(ktd20xx_client, 0x06, 0x3f);//changed by BQ 20150616
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x06, 0x3f);//changed by BQ 20150616
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x05, bread_value[val].raisetime);//rase time
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x01, bread_value[val].breadtime);//dry flash period
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x02, 0x00);//reset internal counter
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, conf);//allocate led1 to timer1 0x02
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x02, 0x56);//led flashing(curerent ramp-up and down countinuously)
+	msleep(10);
 }
 
 void ktd22xx_lowbattery_breath_leds_green(char val){
@@ -68,15 +69,16 @@ void ktd22xx_lowbattery_breath_leds_green(char val){
 	 */
 	conf |= 0x08;
 	printk("[LED] green blink 0x04 value is 0x%2x.\n",conf);
-	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);// mode set---IC work when both SCL and SDA goes high and normal speed
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, 0x00);// initialization LED off
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);// mode set---IC work when both SCL and SDA goes high and normal speed
 	//i2c_smbus_write_byte_data(ktd20xx_client, 0x07, 0x4f);//set current is 10mA
-    i2c_smbus_write_byte_data(ktd20xx_client, 0x07, 0x3f);//changed by BQ 20150616
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x07, 0x3f);//changed by BQ 20150616
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x05, bread_value[val].raisetime);//rase time
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x01, bread_value[val].breadtime);//dry flash period
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x02, 0x00);//reset internal counter
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, conf);//allocate led1 to timer1 0x08
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x02, 0x56);//led flashing(curerent ramp-up and down countinuously)
+	msleep(10);
 }
 
 void ktd22xx_lowbattery_breath_leds_blue(char val){
@@ -86,15 +88,16 @@ void ktd22xx_lowbattery_breath_leds_blue(char val){
 	 */
 	conf |= 0x20;
 	printk("[LED] blue blink 0x04 value is 0x%2x.\n",conf);
-	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);// mode set---IC work when both SCL and SDA goes high and normal speed
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, 0x00);// initialization LED off
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);// mode set---IC work when both SCL and SDA goes high and normal speed
 	//i2c_smbus_write_byte_data(ktd20xx_client, 0x08, 0x4f);//set current is 10mA
-    i2c_smbus_write_byte_data(ktd20xx_client, 0x08, 0x3f);//changed by BQ 20150616
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x08, 0x3f);//changed by BQ 20150616
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x05, bread_value[val].raisetime);//rase time
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x01, bread_value[val].breadtime);//dry flash period
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x02, 0x00);//reset internal counter
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, conf);//allocate led1 to timer1 0x20
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x02, 0x56);//led flashing(curerent ramp-up and down countinuously)
+	msleep(10);
 }
 
 void ktd2xx_led_on_red(void){
@@ -102,7 +105,7 @@ void ktd2xx_led_on_red(void){
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);//mode set---IC work when both SCL and SDA goes high
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, 0x00);// initialization LED off
 	//i2c_smbus_write_byte_data(ktd20xx_client, 0x06, 0x4f);//set current is 10mA
-    i2c_smbus_write_byte_data(ktd20xx_client, 0x06, 0x3f);//changed by BQ 20150616
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x06, 0x3f);//changed by BQ 20150616
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, value);//turn on led
 }
 
@@ -111,7 +114,7 @@ void ktd2xx_led_on_green(void){
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);//mode set---IC work when both SCL and SDA goes high
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, 0x00);// initialization LED off
 	//i2c_smbus_write_byte_data(ktd20xx_client, 0x07, 0x4f);//set current is 10mA
-    i2c_smbus_write_byte_data(ktd20xx_client, 0x07, 0x3f);//changed by BQ 20150616
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x07, 0x3f);//changed by BQ 20150616
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, value);//turn on led
 }
 
@@ -120,7 +123,7 @@ void ktd2xx_led_on_blue(void){
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x00);//mode set---IC work when both SCL and SDA goes high
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, 0x00);// initialization LED off
 	//i2c_smbus_write_byte_data(ktd20xx_client, 0x08, 0x4f);//set current is 10mA
-    i2c_smbus_write_byte_data(ktd20xx_client, 0x08, 0x3f);//changed by BQ 20150616
+	i2c_smbus_write_byte_data(ktd20xx_client, 0x08, 0x3f);//changed by BQ 20150616
 	i2c_smbus_write_byte_data(ktd20xx_client, 0x04, value);//turn on led
 }
 
@@ -136,7 +139,7 @@ void ktd2xx_led_off_red(void){
            i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x08);//Device OFF-Either SCL goes low or SDA stops toggling
            printk("[LED] set SCL low and SDA stops toggling\n");
         }
-
+	msleep(10);
 }
 
 void ktd2xx_led_off_green(void){
@@ -151,7 +154,7 @@ void ktd2xx_led_off_green(void){
            i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x08);//Device OFF-Either SCL goes low or SDA stops toggling
            printk("[LED] set SCL low and SDA stops toggling\n");
         }
-
+	msleep(10);
 }
 
 void ktd2xx_led_off_blue(void){
@@ -165,7 +168,7 @@ void ktd2xx_led_off_blue(void){
            i2c_smbus_write_byte_data(ktd20xx_client, 0x00, 0x08);//Device OFF-Either SCL goes low or SDA stops toggling
            printk("[LED] set SCL low and SDA stops toggling\n");
         }
-
+	msleep(10);
 }
 
 void ktd2xx_led_off(void){

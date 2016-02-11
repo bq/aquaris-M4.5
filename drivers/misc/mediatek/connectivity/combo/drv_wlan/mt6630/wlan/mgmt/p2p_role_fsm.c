@@ -435,6 +435,11 @@ p2pRoleFsmRunEventDeauthTxDone(IN P_ADAPTER_T prAdapter,
 
 		prP2pBssInfo = prAdapter->aprBssInfo[prMsduInfo->ucBssIndex];
 		eOriMediaStatus = prP2pBssInfo->eConnectionState;
+		/* Change station state. */
+		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
+
+		/* Reset Station Record Status. */
+		p2pFuncResetStaRecStatus(prAdapter, prStaRec);
 
         /* Try to remove StaRec in BSS client list before free it */
         bssRemoveClient(prAdapter, prP2pBssInfo, prStaRec);

@@ -2337,6 +2337,7 @@ this_zone_full:
 		page->pfmemalloc = !!(alloc_flags & ALLOC_NO_WATERMARKS);
 
 #if defined(CONFIG_CMA) && defined(CONFIG_MTK_SVP)
+#if defined(CONFIG_MT_ENG_BUILD)
 	if (page) {
 		if (_forbid_cma_alloc) {
 			unsigned long vpfn = page_to_pfn(page);
@@ -2345,14 +2346,8 @@ this_zone_full:
 				pr_alert("%s %d: pfn: %lu in _forbid_cma_alloc %d\n", __func__, __LINE__, vpfn, _forbid_cma_alloc); dump_stack();
 			}
 		}
-
-#if 0
-		{
-			unsigned long vpfn = page_to_pfn(page);
-			if (svp_is_in_range(vpfn)) { pr_alert("%s %d: pfn: %lu\n", __func__, __LINE__, vpfn); dump_stack(); } }
-		}
-#endif
 	}
+#endif
 #endif
 
 	return page;

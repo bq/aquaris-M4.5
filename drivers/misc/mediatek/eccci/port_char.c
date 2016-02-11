@@ -150,7 +150,7 @@ static ssize_t dev_char_read(struct file *file, char *buf, size_t count, loff_t 
     struct ccci_port *port = file->private_data;
     struct ccci_request *req;
     struct ccci_header *ccci_h=NULL;
-    int ret, read_len, full_req_done=0;
+    int ret = 0, read_len = 0, full_req_done=0;
     unsigned long flags;
 
     // 1. get incomming request
@@ -228,6 +228,9 @@ static ssize_t dev_char_read(struct file *file, char *buf, size_t count, loff_t 
         ccci_free_req(req);
     }
 exit:
+    if(port->rx_ch == CCCI_IMSA_DL){
+    	CCCI_INF_MSG(port->modem->index, CHAR, "port %s ret=%d,read_len=%d\n", port->name, ret,read_len);
+    }
     return ret?ret:read_len;
 }
 
@@ -760,7 +763,9 @@ unsigned int dev_char_poll(struct file *fp, struct poll_table_struct *poll)
             CCCI_INF_MSG(port->modem->index, CHAR, "poll error for MD logger at state %d,mask=%d\n", port->modem->md_state,mask);
         }
     }
-
+    if(port->rx_ch == CCCI_IMSA_DL){
+    	CCCI_INF_MSG(port->modem->index, CHAR, "port %s poll mask=%d\n", port->name, mask);
+    }
     return mask;
 }
 
@@ -818,6 +823,9 @@ static int port_char_recv_req(struct ccci_port *port, struct ccci_request *req)
         return 0;
     } else {
         port->flags |= PORT_F_RX_FULLED;
+        if(port->rx_ch == CCCI_IMSA_DL){
+        	CCCI_INF_MSG(port->modem->index, CHAR, "port %s Rx full\n", port->name);
+        }
         spin_unlock_irqrestore(&port->rx_req_lock, flags);
         if((port->flags&PORT_F_ALLOW_DROP)/* || !(port->flags&PORT_F_RX_EXCLUSIVE)*/) {
             CCCI_INF_MSG(port->modem->index, CHAR, "port %s Rx full, drop packet\n", port->name);

@@ -814,7 +814,6 @@ VOID scnFreeAllPendingScanRquests (IN P_ADAPTER_T prAdapter)
     P_SCAN_INFO_T prScanInfo;
     P_MSG_HDR_T prMsgHdr;
     P_MSG_SCN_SCAN_REQ prScanReqMsg;
-    P_MSG_SCN_SCAN_REQ_V2 prScanReqV2Msg;
 
 
     prScanInfo = &(prAdapter->rWifiVar.rScanInfo);
@@ -1776,6 +1775,8 @@ P_BSS_DESC_T scanAddToBssDesc(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb)
 #if 1
 
 	prBssDesc->u2RawLength = prSwRfb->u2PacketLen;
+	if (prBssDesc->u2RawLength > CFG_RAW_BUFFER_SIZE)
+		prBssDesc->u2RawLength = CFG_RAW_BUFFER_SIZE;
 	kalMemCopy(prBssDesc->aucRawBuf, prWlanBeaconFrame, prBssDesc->u2RawLength);
 #endif
 
@@ -2079,9 +2080,23 @@ P_BSS_DESC_T scanAddToBssDesc(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb)
 			}
 		}
 	}
+	
+	/* 4 <5> Check IE information corret or not */
+	if (!rlmDomainIsValidRfSetting(prAdapter, prBssDesc->eBand, prBssDesc->ucChannelNum, prBssDesc->eSco, 
+		prBssDesc->eChannelWidth, prBssDesc->ucCenterFreqS1, prBssDesc->ucCenterFreqS2)) {
+		/*Dump IE Inforamtion*/
+		DBGLOG(RLM, WARN, ("ScanAddToBssDesc IE Information\n"));
+		DBGLOG(RLM, WARN, ("IE Length = %d\n", u2IELength));
+		DBGLOG_MEM8(RLM, WARN, pucIE, u2IELength);
+	
+		/*Error Handling for Non-predicted IE - Fixed to set 20MHz*/		 
+		prBssDesc->eChannelWidth = CW_20_40MHZ; 
+		prBssDesc->ucCenterFreqS1 = 0;
+		prBssDesc->ucCenterFreqS2 = 0;
+		prBssDesc->eSco = CHNL_EXT_SCN;
+	}
 
-
-	/* 4 <5> PHY type setting */
+	/* 4 <6> PHY type setting */
 	prBssDesc->ucPhyTypeSet = 0;
 
 	if (BAND_2G4 == prBssDesc->eBand) {
@@ -2126,7 +2141,7 @@ P_BSS_DESC_T scanAddToBssDesc(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb)
 	}
 
 
-	/* 4 <6> Update BSS_DESC_T's Last Update TimeStamp. */
+	/* 4 <7> Update BSS_DESC_T's Last Update TimeStamp. */
 	GET_CURRENT_SYSTIME(&prBssDesc->rUpdateTime);
 
 	return prBssDesc;
@@ -2454,6 +2469,9 @@ P_BSS_DESC_T scanSearchBssDescByPolicy(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBss
 	/* UINT_8 aucChannelLoad[CHANNEL_NUM] = {0}; */
 
 	BOOLEAN fgIsFixedChannel;
+#if (CFG_AIS_SUPPORT_REJ_CNT_AVOID == 1)
+	BOOLEAN fgIsErrBssFound = (BOOLEAN)FALSE;
+#endif /* CFG_AIS_SUPPORT_REJ_CNT_AVOID */
 	ENUM_BAND_T eBand;
 	UINT_8 ucChannel;
 
@@ -2796,6 +2814,28 @@ P_BSS_DESC_T scanSearchBssDescByPolicy(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBss
 
 				fgIsFindBestRSSI = TRUE;
 			}
+#if (CFG_AIS_SUPPORT_REJ_CNT_AVOID == 1)
+			/* Check if the BSS auth/assoc reject timeout is reached */
+			if (prBssDesc->ucBssErrCnt >= SCN_BSS_DESC_REJ_ERR_CNT) {
+				if (CHECK_FOR_TIMEOUT(rCurrentTime, prBssDesc->ucBssErrTime,
+						SEC_TO_SYSTIME(SCN_BSS_DESC_REJ_ERR_CNT_TIMEOUT_SEC))) {
+
+					prBssDesc->ucBssErrTime = 0;
+					prBssDesc->ucBssErrCnt = 0; /* reset it */
+
+					DBGLOG(SCN, INFO, ("BssErr: Reset BSS "MACSTR" err cnt %d\n",
+						MAC2STR(prBssDesc->aucBSSID),
+						prBssDesc->ucBssErrCntTotal));
+				} else {
+					DBGLOG(SCN, INFO, ("BssErr: Skip BSS "MACSTR" due to err cnt %d\n",
+						MAC2STR(prBssDesc->aucBSSID),
+						prBssDesc->ucBssErrCnt));
+					fgIsErrBssFound = TRUE;
+					continue; /* skip the BSS due to many rejects from AP */
+				}
+			}
+#endif /* CFG_AIS_SUPPORT_REJ_CNT_AVOID */
+
 			break;
 
 		case CONNECT_BY_SSID_ANY:
@@ -2936,6 +2976,19 @@ P_BSS_DESC_T scanSearchBssDescByPolicy(IN P_ADAPTER_T prAdapter, IN UINT_8 ucBss
 #endif
 		}
 	}
+#if (CFG_AIS_SUPPORT_REJ_CNT_AVOID == 1)
+	if ((prCandidateBssDesc == NULL) && (fgIsErrBssFound == TRUE))
+	{
+		/* cannot find any so clear err count */
+		LINK_FOR_EACH_ENTRY(prBssDesc, prBSSDescList, rLinkEntry, BSS_DESC_T) {
+			/* reset all and wait for next scan, we do not re-search again here */
+			prBssDesc->ucBssErrTime = 0;
+			prBssDesc->ucBssErrCnt = 0;
+
+			DBGLOG(SCN, INFO, ("BssErr: Reset All Bss Err Count\n"));
+		}
+	}
+#endif /* CFG_AIS_SUPPORT_REJ_CNT_AVOID */
 
 	return prCandidateBssDesc;
 

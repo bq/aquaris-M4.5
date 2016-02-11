@@ -1785,8 +1785,10 @@ scanAddToBssDesc (
     }
 #if 1
 	
-		prBssDesc->u2RawLength = prSwRfb->u2PacketLen;
-		kalMemCopy(prBssDesc->aucRawBuf, prWlanBeaconFrame, prBssDesc->u2RawLength);
+	prBssDesc->u2RawLength = prSwRfb->u2PacketLen;
+	if (prBssDesc->u2RawLength > CFG_RAW_BUFFER_SIZE)
+		prBssDesc->u2RawLength = CFG_RAW_BUFFER_SIZE;
+	kalMemCopy(prBssDesc->aucRawBuf, prWlanBeaconFrame, prBssDesc->u2RawLength);
 #endif
 
     /* NOTE: Keep consistency of Scan Record during JOIN process */
@@ -1834,7 +1836,6 @@ scanAddToBssDesc (
 #if CFG_PRIVACY_MIGRATION
     prBssDesc->fgIEWPA = FALSE;
 #endif
-
 
     //4 <3.1> Full IE parsing on SW_RFB_T
     pucIE = prWlanBeaconFrame->aucInfoElem;
@@ -2003,6 +2004,7 @@ scanAddToBssDesc (
                     }
                 }
 #endif /* CFG_ENABLE_WIFI_DIRECT */
+
             }
             break;
 

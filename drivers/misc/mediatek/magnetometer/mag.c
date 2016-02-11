@@ -19,7 +19,7 @@ static void mag_work_func(struct work_struct *work)
 	int err;	
 	int i;
 	int x,y,z,status;
-	static int flag=0; /*bosch add fot cts verify*/
+	static int o_flag=0,m_flag=0; /*bosch add fot cts verify*/
 	cxt  = mag_context_obj;
 	memset(&sensor_data, 0, sizeof(sensor_data));	
 	time.tv_sec = time.tv_nsec = 0;    
@@ -38,6 +38,13 @@ static void mag_work_func(struct work_struct *work)
 		if(ID_M_V_MAGNETIC ==i)
 		{
 			err = cxt->mag_dev_data.get_data_m(&x,&y,&z,&status);
+/*bosch add fot cts verify start*/
+			m_flag = !m_flag;
+			if(m_flag)
+				z++;
+			else
+				z--;
+/*bosch add fot cts verify end!!*/
 			if(err)
 	   		{
 		  		MAG_ERR("get %d data fails!!\n" ,i);
@@ -74,8 +81,8 @@ static void mag_work_func(struct work_struct *work)
 			
 			err = cxt->mag_dev_data.get_data_o(&x,&y,&z,&status);
 /*bosch add fot cts verify start*/
-			flag = !flag;
-			if(flag)
+			o_flag = !o_flag;
+			if(o_flag)
 				z++;
 			else
 				z--;

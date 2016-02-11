@@ -621,6 +621,8 @@ typedef struct _QUE_MGT_T {	/* Queue Management Control Info */
 #endif
 
     UINT_32 u4MaxForwardBufferCount;
+
+    OS_SYSTIME rLastTxPktDumpTime;
 } QUE_MGT_T, *P_QUE_MGT_T;
 
 
@@ -1183,6 +1185,11 @@ VOID mqmHandleAddBaReq(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfb);
 VOID mqmHandleBaActionFrame(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb);
 #endif
 
+#if ARP_MONITER_ENABLE 
+VOID qmDetectArpNoResponse(P_ADAPTER_T prAdapter, P_MSDU_INFO_T prMsduInfo);
+VOID qmResetArpDetect(VOID);
+VOID qmHandleRxArpPackets(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb);
+#endif
 
 /*******************************************************************************
  *                              F U N C T I O N S

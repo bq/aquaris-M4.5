@@ -1151,6 +1151,10 @@ kalDevRegRead (
     HifInfo = &GlueInfo->rHifInfo;
 
     /* use PIO mode to read register */
+	if (WlanDmaFatalErr && RegOffset != MCR_WCIR && RegOffset != MCR_WHLPCR)
+	{
+		return FALSE;
+	}
     *pu4Value = HIF_REG_READL(HifInfo, RegOffset);
 
     if ((RegOffset == MCR_WRDR0) || (RegOffset == MCR_WRDR1))
@@ -1190,6 +1194,10 @@ kalDevRegWrite (
     HifInfo = &GlueInfo->rHifInfo;
 
     /* use PIO mode to write register */
+	if (WlanDmaFatalErr && RegOffset != MCR_WCIR && RegOffset != MCR_WHLPCR)
+	{
+		return FALSE;
+	}
     HIF_REG_WRITEL(HifInfo, RegOffset, RegValue);
 
     if ((RegOffset == MCR_WTDR0) || (RegOffset == MCR_WTDR1))
@@ -1220,9 +1228,9 @@ BOOLEAN
 kalDevPortRead (
     IN  GLUE_INFO_T     *GlueInfo,
     IN  UINT_16         Port,
-    IN  UINT_16         Size,
+    IN  UINT_32         Size,
     OUT PUINT_8         Buf,
-    IN  UINT_16         MaxBufSize
+    IN  UINT_32         MaxBufSize
     )
 {
     GL_HIF_INFO_T *HifInfo;
@@ -1259,7 +1267,7 @@ kalDevPortRead (
         }
 #endif /* CONF_HIF_CONNSYS_DBG */
 
-        return TRUE;
+        return FALSE;
     }
 
     /* Init */
@@ -1380,7 +1388,15 @@ kalDevPortRead (
                     */
 				printk("DMA LoopCnt > 100000... (%lu %lu)\n", jiffies, PollTimeout);
 //LabelErr:
-                HifRegDump(GlueInfo->prAdapter);
+				{
+					UINT_32 uwcir = 0;
+					UINT_32 uwhlpcr = 0;
+
+					uwcir = (UINT_32)HIF_REG_READL(HifInfo, MCR_WCIR);
+					uwhlpcr = (UINT_32)HIF_REG_READL(HifInfo, MCR_WHLPCR);
+					printk("addr MCR_WCIR is %u, addr MCR_WHLPCR is %u\n", uwcir, uwhlpcr);
+				}
+
                 if (HifInfo->DmaOps->DmaRegDump != NULL)
                     HifInfo->DmaOps->DmaRegDump(HifInfo);
 
@@ -1393,23 +1409,11 @@ kalDevPortRead (
                 UINT_32 RegValChip, RegValLP, FwCnt;
                 extern BOOLEAN mtk_wcn_wmt_assert(void);
                 printk("CONNSYS FW CPUINFO:\n");
-                for(FwCnt=0; FwCnt<512; FwCnt++)
+                for(FwCnt=0; FwCnt<512; FwCnt++) {
                     printk("0x%08x ", MCU_REG_READL(HifInfo, CONN_MCU_CPUPCR)); // CONSYS_REG_READ(CONSYS_CPUPCR_REG)
-                printk("\n\n");
-                kalDevRegRead(GlueInfo, 0x00, &RegValChip);
-                kalDevRegRead(GlueInfo, 0x04, &RegValLP);
-                if ((RegValChip != 0) && (RegValLP == 0))
-                {
-                    /* HIF clock & CONNSYS is powered on but own fails */
-                    /* for the case we just printk kernel error message */
-                    printk("<WLANRXERR><vend_samp.lin> 0x%x 0x%x 0x%x\n",
-                        *(volatile unsigned int *)0xF0000024,
-                        (UINT_32)RegValChip, (UINT_32)RegValLP);
-                    return TRUE;
-                }
-                printk("<WLANRXERR><vend_samp.lin> 0x%x 0x%x 0x%x\n",
-                    *(volatile unsigned int *)0xF0000024,
-                    (UINT_32)RegValChip, (UINT_32)RegValLP);
+                	if ((FwCnt + 1) % 16 == 0)
+						printk("\n");
+				}
 
 #if 0
                 mtk_wcn_wmt_assert();
@@ -1437,7 +1441,7 @@ kalDevPortRead (
                 /* re-dump HIF registers */
                 HifRegDump(GlueInfo->prAdapter);
 #endif
-                return TRUE;
+                return FALSE;
 }
 #endif /* CONF_HIF_DMA_DBG */
 #endif /* CONF_HIF_CONNSYS_DBG */
@@ -1511,9 +1515,9 @@ BOOLEAN
 kalDevPortWrite (
     IN GLUE_INFO_T      *GlueInfo,
     IN UINT_16          Port,
-    IN UINT_16          Size,
+    IN UINT_32          Size,
     IN PUINT_8          Buf,
-    IN UINT_16          MaxBufSize
+    IN UINT_32          MaxBufSize
     )
 {
     GL_HIF_INFO_T *HifInfo;
@@ -1553,7 +1557,7 @@ kalDevPortWrite (
         }
 #endif /* CONF_HIF_CONNSYS_DBG */
 
-        return TRUE;
+        return FALSE;
     }
 
     /* Init */
@@ -1689,7 +1693,14 @@ if (testgdmaclock == 1)
 
 				printk("DMA LoopCnt > 100000... (%lu %lu)\n", jiffies, PollTimeout);
 //LabelErr:
-                HifRegDump(GlueInfo->prAdapter);
+				{
+					UINT_32 uwcir = 0;
+					UINT_32 uwhlpcr = 0;
+
+					uwcir = (UINT_32)HIF_REG_READL(HifInfo, MCR_WCIR);
+					uwhlpcr = (UINT_32)HIF_REG_READL(HifInfo, MCR_WHLPCR);
+					printk("addr MCR_WCIR is %u, addr MCR_WHLPCR is %u\n", uwcir, uwhlpcr);
+				}
                 if (HifInfo->DmaOps->DmaRegDump != NULL)
                     HifInfo->DmaOps->DmaRegDump(HifInfo);
                 LoopCnt = 0;
@@ -1702,23 +1713,11 @@ if (testgdmaclock == 1)
                 UINT_32 RegValChip, RegValLP, FwCnt;
                 extern BOOLEAN mtk_wcn_wmt_assert(void);
                 printk("CONNSYS FW CPUINFO:\n");
-                for(FwCnt=0; FwCnt<512; FwCnt++)
+                for(FwCnt=0; FwCnt<512; FwCnt++) {
                     printk("0x%08x ", MCU_REG_READL(HifInfo, CONN_MCU_CPUPCR));
-                printk("\n\n");
-                kalDevRegRead(GlueInfo, 0x00, &RegValChip);
-                kalDevRegRead(GlueInfo, 0x04, &RegValLP);
-                if ((RegValChip != 0) && (RegValLP == 0))
-                {
-                    /* HIF clock & CONNSYS is powered on but own fails */
-                    /* for the case we just printk kernel error message */
-                    printk("<WLANTXERR><vend_samp.lin> 0x%x 0x%x 0x%x\n",
-                        *(volatile unsigned int *)0xF0000024,
-                        (UINT_32)RegValChip, (UINT_32)RegValLP);
-                    return TRUE;
-                }
-                printk("<WLANTXERR><vend_samp.lin> 0x%x 0x%x 0x%x\n",
-                    *(volatile unsigned int *)0xF0000024,
-                    (UINT_32)RegValChip, (UINT_32)RegValLP);
+                	if ((FwCnt + 1) % 16 == 0)
+						printk("\n");
+				}
 #if 0
                 mtk_wcn_wmt_assert();
                 sprintf(AeeBuffer, "<WLANTXERR><vend_samp.lin> 0x%x 0x%x 0x%x",
@@ -1726,7 +1725,7 @@ if (testgdmaclock == 1)
                         (UINT_32)RegValChip, (UINT_32)RegValLP);
                 kalSendAeeWarning(AeeBuffer, "", "");
 #endif
-                return TRUE;
+                return FALSE;
 }
 #endif /* CONF_HIF_DMA_DBG */
 #endif /* CONF_HIF_CONNSYS_DBG */

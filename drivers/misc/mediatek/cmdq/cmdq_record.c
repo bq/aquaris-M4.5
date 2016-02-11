@@ -879,6 +879,11 @@ int32_t cmdqRecBackupUpdateSlot(cmdqRecHandle handle,
 
 int32_t cmdqRecEnablePrefetch(cmdqRecHandle handle)
 {
+#ifdef _CMDQ_DISABLE_MARKER_
+	/* disable pre-fetch marker feature but use auto prefetch mechanism */
+	CMDQ_MSG("not allow enable prefetch, scenario: %d\n", handle->scenario);
+	return true;
+#else
 	if (cmdq_core_should_enable_prefetch(handle->scenario)) {
 		/* enable prefetch */
         CMDQ_VERBOSE("REC: enable prefetch\n");
@@ -887,6 +892,7 @@ int32_t cmdqRecEnablePrefetch(cmdqRecHandle handle)
 	}
 	CMDQ_ERR("not allow enable prefetch, scenario: %d\n", handle->scenario);
 	return -EFAULT;
+#endif
 }
 
 int32_t cmdqRecDisablePrefetch(cmdqRecHandle handle)

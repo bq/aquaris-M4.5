@@ -49,7 +49,11 @@ void init_ddp_mmp_events(void)
         DDP_MMP_Events.present_fence_release =  MMProfileRegisterEvent(DDP_MMP_Events.primary_Parent, "preset_fence_release");
         DDP_MMP_Events.present_fence_get =  MMProfileRegisterEvent(DDP_MMP_Events.primary_Parent, "preset_fence_get");
         DDP_MMP_Events.present_fence_set =  MMProfileRegisterEvent(DDP_MMP_Events.primary_Parent, "preset_fence_set");
-        
+
+        DDP_MMP_Events.tui =  MMProfileRegisterEvent(DDP_MMP_Events.primary_Parent, "tui");
+        DDP_MMP_Events.idlemgr =  MMProfileRegisterEvent(DDP_MMP_Events.primary_Parent, "idlemgr");
+        DDP_MMP_Events.primary_error =  MMProfileRegisterEvent(DDP_MMP_Events.primary_Parent, "primary_error");
+
 #ifdef CONFIG_MTK_HDMI_SUPPORT
         DDP_MMP_Events.Extd_Parent =      MMProfileRegisterEvent(DDP_MMP_Events.DDP, "ext_disp");
         DDP_MMP_Events.Extd_State = MMProfileRegisterEvent(DDP_MMP_Events.Extd_Parent, "ext_State");
@@ -141,6 +145,7 @@ void init_ddp_mmp_events(void)
 		DDP_MMP_Events.DSI_IRQ[0] = MMProfileRegisterEvent(DDP_MMP_Events.DSI_IRQ_Parent, "DSI_IRQ_0");
 		DDP_MMP_Events.DSI_IRQ[1] = MMProfileRegisterEvent(DDP_MMP_Events.DSI_IRQ_Parent, "DSI_IRQ_1");
     		DDP_MMP_Events.primary_sw_mutex = MMProfileRegisterEvent(DDP_MMP_Events.DDP, "primary_sw_mutex");	   
+		DDP_MMP_Events.session_release = MMProfileRegisterEvent(DDP_MMP_Events.session_Parent, "session_release");	   
 
 		DDP_MMP_Events.MonitorParent = MMProfileRegisterEvent(DDP_MMP_Events.DDP, "Monitor");
 		DDP_MMP_Events.trigger_delay = MMProfileRegisterEvent(DDP_MMP_Events.MonitorParent, "Trigger Delay");
@@ -164,6 +169,7 @@ void init_ddp_mmp_events(void)
     	MMProfileEnableEventRecursive(DDP_MMP_Events.MutexParent, 1);
     	MMProfileEnableEventRecursive(DDP_MMP_Events.DDP_IRQ, 1);
     	
+    	MMProfileEnableEvent(DDP_MMP_Events.primary_sw_mutex, 0);
     	MMProfileEnableEvent(DDP_MMP_Events.primary_seq_insert, 0);
     	MMProfileEnableEvent(DDP_MMP_Events.primary_seq_config, 0);
     	MMProfileEnableEvent(DDP_MMP_Events.primary_seq_trigger, 0);

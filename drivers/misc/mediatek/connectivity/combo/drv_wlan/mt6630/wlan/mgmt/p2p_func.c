@@ -539,7 +539,9 @@ p2pFuncTxMgmtFrame(IN P_ADAPTER_T prAdapter,
 
     			break;
             }
-			prMgmtTxMsdu =
+			prMgmtTxMsdu->ucStaRecIndex = 
+                           (prStaRec != NULL)?(prStaRec->ucIndex) : (STA_REC_INDEX_NOT_FOUND);
+                        prMgmtTxMsdu =
 			    p2pFuncProcessP2pProbeRsp(prAdapter, ucBssIndex, prMgmtTxMsdu);
 			ucRetryLimit = 2;
 			break;
@@ -1457,12 +1459,6 @@ p2pFuncDisconnect(IN P_ADAPTER_T prAdapter,
 					    (P_SW_RFB_T) NULL,
 					    u2ReasonCode,
 					    (PFN_TX_DONE_HANDLER) p2pRoleFsmRunEventDeauthTxDone);
-
-			/* Change station state. */
-			cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
-
-			/* Reset Station Record Status. */
-			p2pFuncResetStaRecStatus(prAdapter, prStaRec);
 		} else {
 			/* Change station state. */
 			cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
@@ -2954,6 +2950,7 @@ p2pFuncProcessP2pProbeRsp(IN P_ADAPTER_T prAdapter,
 		bssBuildBeaconProbeRespFrameCommonIEs(prRetMsduInfo,
 						      prP2pBssInfo, prProbeRspFrame->aucDestAddr);
 
+                prRetMsduInfo->ucStaRecIndex = prMgmtTxMsdu->ucStaRecIndex;
 
 		for (u4Idx = 0; u4Idx < u4IeArraySize; u4Idx++) {
 			if (txProbeRspIETable[u4Idx].pfnAppendIE) {

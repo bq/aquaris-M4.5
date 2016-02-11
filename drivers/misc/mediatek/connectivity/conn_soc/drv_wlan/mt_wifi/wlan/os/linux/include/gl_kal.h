@@ -1379,18 +1379,18 @@ BOOLEAN
 kalDevPortRead(
     IN  P_GLUE_INFO_T   prGlueInfo,
     IN  UINT_16         u2Port,
-    IN  UINT_16         u2Len,
+    IN  UINT_32         u2Len,
     OUT PUINT_8         pucBuf,
-    IN  UINT_16         u2ValidOutBufSize
+    IN  UINT_32         u2ValidOutBufSize
     );
 
 BOOLEAN
 kalDevPortWrite(
     P_GLUE_INFO_T  prGlueInfo,
     IN UINT_16     u2Port,
-    IN UINT_16     u2Len,
+    IN UINT_32     u2Len,
     IN PUINT_8     pucBuf,
-    IN UINT_16     u2ValidInBufSize
+    IN UINT_32     u2ValidInBufSize
     );
 
 BOOLEAN
@@ -1422,7 +1422,6 @@ kalQoSFrameClassifierAndPacketInfo (
     OUT PUINT_8 pucEthDestAddr,
     OUT PBOOLEAN pfgIs1X,
     OUT PBOOLEAN pfgIsPAL,
-    OUT PBOOLEAN pfgIsNeedAck,
     OUT PUINT_8 pucNetworkType
 );
 
@@ -1867,5 +1866,7 @@ kalReadToFile(
     UINT_32 u4Size,
     PUINT_32 pu4ReadSize
     );
+
+BOOLEAN kalIsWakeupByWlan(P_ADAPTER_T  prAdapter);
 #endif /* _GL_KAL_H */
 

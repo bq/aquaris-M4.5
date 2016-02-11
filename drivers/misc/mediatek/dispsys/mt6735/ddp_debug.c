@@ -860,6 +860,19 @@ static void process_dbg_opt(const char *opt)
     {
         init_ddp_mmp_events();
     }
+    else if (0 == strncmp(opt, "tui:", 4))
+    {
+        if (0 == strncmp(opt + 4, "on", 2))
+        {  
+            display_enter_tui();
+            printk("enter tui\n");
+        }
+        else if (0 == strncmp(opt + 4, "off", 3))
+        {
+            display_exit_tui();
+            printk("leave tui\n");
+        }
+    }
     else
     {
         dbg_buf[0]='\0';

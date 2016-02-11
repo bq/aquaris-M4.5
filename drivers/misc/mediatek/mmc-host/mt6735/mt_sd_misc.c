@@ -149,6 +149,18 @@ static int simple_sd_ioctl_multi_rw(struct msdc_ioctl *msdc_ctl)
     BUG_ON(!host_ctl->mmc);
     BUG_ON(!host_ctl->mmc->card);
 
+    if (msdc_ctl->iswrite){
+        if (MSDC_CARD_DUNM_FUNC != msdc_ctl->opcode) {
+            if (copy_from_user(sg_msdc_multi_buffer, msdc_ctl->buffer, msdc_ctl->total_size)){
+                dma_force[host_ctl->id] = FORCE_NOTHING;
+                ret = -EFAULT; 
+                goto multi_end_without_release;
+            }
+        } else {
+            /* called from other kernel module */
+            memcpy(sg_msdc_multi_buffer, msdc_ctl->buffer, msdc_ctl->total_size);
+        }
+    }
     mmc_claim_host(host_ctl->mmc);
 
 #if DEBUG_MMC_IOCTL
@@ -215,16 +227,6 @@ static int simple_sd_ioctl_multi_rw(struct msdc_ioctl *msdc_ctl)
 		msdc_data.flags = MMC_DATA_WRITE;
 		msdc_cmd.opcode = MMC_WRITE_MULTIPLE_BLOCK;
 		msdc_data.blocks = msdc_ctl->total_size / 512;
-		if (MSDC_CARD_DUNM_FUNC != msdc_ctl->opcode) {
-			if (copy_from_user(sg_msdc_multi_buffer, msdc_ctl->buffer, msdc_ctl->total_size)) {
-				dma_force[host_ctl->id] = FORCE_NOTHING;
-				ret = -EFAULT;
-				goto multi_end;
-			}
-		} else {
-			/* called from other kernel module */
-			memcpy(sg_msdc_multi_buffer, msdc_ctl->buffer, msdc_ctl->total_size);
-		}
 	} else {
 		msdc_data.flags = MMC_DATA_READ;
 		msdc_cmd.opcode = MMC_READ_MULTIPLE_BLOCK;
@@ -279,21 +281,7 @@ static int simple_sd_ioctl_multi_rw(struct msdc_ioctl *msdc_ctl)
 	mmc_set_data_timeout(&msdc_data, host_ctl->mmc->card);
 	mmc_wait_for_req(host_ctl->mmc, &msdc_mrq);
 
-	if (!msdc_ctl->iswrite) {
-		if (MSDC_CARD_DUNM_FUNC != msdc_ctl->opcode) {
-			if (copy_to_user(msdc_ctl->buffer, sg_msdc_multi_buffer, msdc_ctl->total_size)) {
-				dma_force[host_ctl->id] = FORCE_NOTHING;
-				ret = -EFAULT;
-				goto multi_end;
-			}
-		} else {
-			/* called from other kernel module */
-			memcpy(msdc_ctl->buffer, sg_msdc_multi_buffer, msdc_ctl->total_size);
-		}
-	}
 
-    /* clear the global buffer of R/W IOCTL */
-    memset(sg_msdc_multi_buffer, 0 , msdc_ctl->total_size);
     
 	if (msdc_ctl->partition) {
 		ret = mmc_send_ext_csd(host_ctl->mmc->card, l_buf);
@@ -309,9 +297,27 @@ static int simple_sd_ioctl_multi_rw(struct msdc_ioctl *msdc_ctl)
 			mmc_switch(host_ctl->mmc->card, 0, 179, l_buf[179], 1000);
 		}
 	}
+    mmc_release_host(host_ctl->mmc);
+    if (!msdc_ctl->iswrite){
+        if (MSDC_CARD_DUNM_FUNC != msdc_ctl->opcode) {
+            if (copy_to_user(msdc_ctl->buffer, sg_msdc_multi_buffer, msdc_ctl->total_size)){
+                dma_force[host_ctl->id] = FORCE_NOTHING;
+                ret = -EFAULT;
+                goto multi_end_without_release;
+            }
+        } else {
+            /* called from other kernel module */
+            memcpy(msdc_ctl->buffer, sg_msdc_multi_buffer, msdc_ctl->total_size);
+        }
+    }
+    /* clear the global buffer of R/W IOCTL */
+    memset(sg_msdc_multi_buffer, 0 , msdc_ctl->total_size);
+    goto multi_end_without_release;
 
 multi_end:
 	mmc_release_host(host_ctl->mmc);
+multi_end_without_release:
+
 	if (ret)
 		msdc_ctl->result = ret;
 
@@ -352,6 +358,20 @@ static int simple_sd_ioctl_single_rw(struct msdc_ioctl *msdc_ctl)
 		&& (host_ctl->mmc->card->ext_csd.cache_ctrl & 0x1))
 		return simple_sd_ioctl_multi_rw(msdc_ctl);
 #endif
+    if (msdc_ctl->iswrite){
+        if (MSDC_CARD_DUNM_FUNC != msdc_ctl->opcode) {
+            if (copy_from_user(sg_msdc_multi_buffer, msdc_ctl->buffer, 512)){
+                dma_force[host_ctl->id] = FORCE_NOTHING;
+                ret = -EFAULT;
+                goto single_end_without_release;
+            }
+        } else {
+            /* called from other kernel module */
+            memcpy(sg_msdc_multi_buffer, msdc_ctl->buffer, 512);
+        }
+    } else {
+        memset(sg_msdc_multi_buffer, 0 , 512);
+    }
 
 	mmc_claim_host(host_ctl->mmc);
 
@@ -416,16 +436,6 @@ static int simple_sd_ioctl_single_rw(struct msdc_ioctl *msdc_ctl)
 		msdc_data.flags = MMC_DATA_WRITE;
 		msdc_cmd.opcode = MMC_WRITE_BLOCK;
 		msdc_data.blocks = msdc_ctl->total_size / 512;
-		if (MSDC_CARD_DUNM_FUNC != msdc_ctl->opcode) {
-			if (copy_from_user(sg_msdc_multi_buffer, msdc_ctl->buffer, 512)) {
-				dma_force[host_ctl->id] = FORCE_NOTHING;
-				ret = -EFAULT;
-				goto single_end;
-			}
-		} else {
-			/* called from other kernel module */
-			memcpy(sg_msdc_multi_buffer, msdc_ctl->buffer, 512);
-		}
 	} else {
 		msdc_data.flags = MMC_DATA_READ;
 		msdc_cmd.opcode = MMC_READ_SINGLE_BLOCK;
@@ -456,22 +466,6 @@ static int simple_sd_ioctl_single_rw(struct msdc_ioctl *msdc_ctl)
 
 	mmc_wait_for_req(host_ctl->mmc, &msdc_mrq);
 
-	if (!msdc_ctl->iswrite) {
-		if (MSDC_CARD_DUNM_FUNC != msdc_ctl->opcode) {
-			if (copy_to_user(msdc_ctl->buffer, sg_msdc_multi_buffer, 512)) {
-				dma_force[host_ctl->id] = FORCE_NOTHING;
-				ret = -EFAULT;
-				goto single_end;
-			}
-		} else {
-			/* called from other kernel module */
-			memcpy(msdc_ctl->buffer, sg_msdc_multi_buffer, 512);
-		}
-	}
-
-    /* clear the global buffer of R/W IOCTL */
-    memset(sg_msdc_multi_buffer, 0 , 512);
-    
 	if (msdc_ctl->partition) {
 		ret = mmc_send_ext_csd(host_ctl->mmc->card, l_buf);
 		if (ret) {
@@ -486,9 +480,28 @@ static int simple_sd_ioctl_single_rw(struct msdc_ioctl *msdc_ctl)
 			mmc_switch(host_ctl->mmc->card, 0, 179, l_buf[179], 1000);
 		}
 	}
+    mmc_release_host(host_ctl->mmc);
+    if (!msdc_ctl->iswrite){
+        if (MSDC_CARD_DUNM_FUNC != msdc_ctl->opcode) {
+            if (copy_to_user(msdc_ctl->buffer,sg_msdc_multi_buffer,512)){
+                dma_force[host_ctl->id] = FORCE_NOTHING;
+                ret = -EFAULT;
+                goto single_end_without_release;
+                }
+        } else {
+            /* called from other kernel module */
+            memcpy(msdc_ctl->buffer,sg_msdc_multi_buffer,512);
+        }
+    }
+    
+     /* clear the global buffer of R/W IOCTL */
+    memset(sg_msdc_multi_buffer, 0 , 512);   
+    goto single_end_without_release;
 
 single_end:
 	mmc_release_host(host_ctl->mmc);
+single_end_without_release:
+	
 	if (ret)
 		msdc_ctl->result = ret;
 
@@ -1285,7 +1298,10 @@ static long simple_sd_ioctl(struct file *file, unsigned int cmd, unsigned long a
         if (copy_from_user(&msdc_ctl, (struct msdc_ioctl*)arg, sizeof(struct msdc_ioctl))){
             return -EFAULT; 
         }
-    
+		if (msdc_ctl.opcode != MSDC_ERASE_PARTITION) {
+			if (msdc_ctl.host_num >= HOST_MAX_NUM || msdc_ctl.host_num < 0)
+				return -EFAULT;
+		}
         switch (msdc_ctl.opcode){
             case MSDC_SINGLE_READ_WRITE:
                 msdc_ctl.result = simple_sd_ioctl_single_rw(&msdc_ctl);

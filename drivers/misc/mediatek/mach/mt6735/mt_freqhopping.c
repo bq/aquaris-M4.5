@@ -107,7 +107,7 @@ static const struct freqhopping_ssc ssc_mainpll_setting[]= {
 static const struct freqhopping_ssc ssc_mempll_setting[]= {
 	{0,0,0,0,0,0},
 	{0,0xFF,0xFF,0xFF,0xFF,0xFF},
-	{MEMPLL_DEF_FREQ ,0 ,9 ,0, 8, 0x1C000},//0 ~ -8%
+	{MEMPLL_DEF_FREQ ,0 ,5 ,0, 8, 0x1C000},//0 ~ -8%
 	{0,0,0,0,0,0}
 };
 
@@ -510,7 +510,7 @@ static void wait_mempll_dds_stable(
 	while((target_dds != fh_dds) && (i < wait_count))
     {
         DFS_APDMA_Enable(); 
-        udelay(4);
+        //udelay(4);
         fh_dds = (DRV_Reg32(reg_mon)) & MASK21b;
         DFS_APDMA_END();         
         ++i;
@@ -557,11 +557,21 @@ static int mt_fh_hal_dvfs(enum FH_PLL_ID pll_id, unsigned int dds_value)
     //for slope setting.
     //TODO: Does this need to be changed?
     fh_write32(REG_FHCTL_SLOPE0, 0x6003c97);
-#if defined(CONFIG_ARCH_MT6735M) //D2 slope
-    fh_write32(REG_FHCTL_SLOPE1, 0xFF0023F8);	
+    if (pll_id == FH_MEM_PLLID) {
+#if defined(CONFIG_ARCH_MT6735)	/* D1 slope */
+	fh_write32(REG_FHCTL_SLOPE1, 0xFF00095A);
+#elif defined(CONFIG_ARCH_MT6735M)	/* D2 slope */
+	fh_write32(REG_FHCTL_SLOPE1, 0xFF000693);
 #else
-    fh_write32(REG_FHCTL_SLOPE1, 0xFF003414);	
-#endif 
+	fh_write32(REG_FHCTL_SLOPE1, 0xFF000877);
+#endif
+    } else {
+#if defined(CONFIG_ARCH_MT6735M)	/* D2 slope */
+	fh_write32(REG_FHCTL_SLOPE1, 0xFF0023F8);
+#else
+	fh_write32(REG_FHCTL_SLOPE1, 0xFF003414);
+#endif
+    }
 
     //FH_MSG("2. enable DVFS and Hopping control");
 
@@ -585,7 +595,7 @@ static int mt_fh_hal_dvfs(enum FH_PLL_ID pll_id, unsigned int dds_value)
     if(pll_id == FH_MEM_PLLID) 
     {
         /* mempll need dummy read */
-        wait_mempll_dds_stable(dds_value, g_reg_mon[pll_id], 200);
+        wait_mempll_dds_stable(dds_value, g_reg_mon[pll_id], 10000);
     }else
     {
 				wait_dds_stable(dds_value, g_reg_mon[pll_id], 100);

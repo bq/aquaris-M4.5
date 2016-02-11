@@ -329,6 +329,11 @@ bssSetTIMBitmap (
     IN UINT_16 u2AssocId
     );
 
+P_STA_RECORD_T bssGetClientByAddress(
+	IN P_BSS_INFO_T prBssInfo,
+	PUINT_8 pucMacAddr
+	);
+
 
 /*link function to p2p module for txBcnIETable*/
 

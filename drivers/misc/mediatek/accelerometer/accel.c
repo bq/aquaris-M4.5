@@ -17,6 +17,7 @@ static void acc_work_func(struct work_struct *work)
 	struct acc_context *cxt = NULL;
 	/* hwm_sensor_data sensor_data; */
 	int x, y, z, status;
+	static int a_flag=0; /*bosch add fot cts verify*/
 	int64_t nt;
 	struct timespec time;
 	int err;
@@ -34,6 +35,14 @@ static void acc_work_func(struct work_struct *work)
 	nt = time.tv_sec * 1000000000LL + time.tv_nsec;
 
 	err = cxt->acc_data.get_data(&x,&y,&z,&status);
+
+/*bosch add fot cts verify start*/
+	a_flag = !a_flag;
+	if(a_flag)
+		z++;
+	else
+		z--;
+/*bosch add fot cts verify end!!*/
 
 	if (err) {
 		ACC_ERR("get acc data fails!!\n");

@@ -594,12 +594,7 @@ nicCmdEventQueryLinkSpeed(
         prGlueInfo = prAdapter->prGlueInfo;
         pu4LinkSpeed = (PUINT_32)(prCmdInfo->pvInformationBuffer);
 
-        if(prLinkQuality->u2LinkSpeed == 0) {
-            *pu4LinkSpeed = 10000; /* 10K * 100bps = 1Mbps */
-        }
-        else {
-            *pu4LinkSpeed = prLinkQuality->u2LinkSpeed * 5000;
-        }
+        *pu4LinkSpeed = prLinkQuality->u2LinkSpeed * 5000;
 
         u4QueryInfoLen = sizeof(UINT_32);
 

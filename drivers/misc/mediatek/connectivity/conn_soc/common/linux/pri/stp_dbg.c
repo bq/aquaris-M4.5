@@ -1145,6 +1145,9 @@ int stp_dbg_log_pkt(MTKSTP_DBG_T *stp_dbg, int dbg_type,
         /*dbg is disable,and not to log*/
     }
     else {
+		hdr.no = 0;
+		hdr.chs = 0;
+		
         stp_dbg_fill_hdr(&hdr,
             (int) type,
             (int) ack_no,
@@ -1250,11 +1253,7 @@ static int stp_dbg_nl_reset(
     return 0;
 }
 
-char
-stp_dbg_nl_send(
-    char *  aucMsg,
-    unsigned char      cmd
-    )
+INT8 stp_dbg_nl_send(PINT8 aucMsg, UINT8 cmd, INT32 len)
 {
     struct sk_buff *skb = NULL;
     void *msg_head = NULL;
@@ -1282,7 +1281,8 @@ stp_dbg_nl_send(
                 return -1;
             }
 
-            rc = nla_put_string(skb, STP_DBG_ATTR_MSG, aucMsg);
+            //rc = nla_put_string(skb, STP_DBG_ATTR_MSG, aucMsg);
+			rc = nla_put(skb, STP_DBG_ATTR_MSG, len, aucMsg);
             if(rc != 0) 
             {            
                 nlmsg_free(skb);
@@ -1297,7 +1297,7 @@ stp_dbg_nl_send(
             rc = genlmsg_unicast(&init_net, skb, bind_pid[i]);
             if(rc != 0) 
             {
-                STP_DBG_ERR_FUNC("%s(): genlmsg_unicast fail...\n", __func__);
+                STP_DBG_ERR_FUNC("%s(): genlmsg_unicast fail...%d\n", __func__,rc);
                 return -1;
             }
         }

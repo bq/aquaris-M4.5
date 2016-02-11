@@ -29,6 +29,7 @@
 #define STP_DEL_SIZE   2    /* STP delimiter length */
 
 UINT32 gStpDbgLvl = STP_LOG_INFO;
+unsigned int g_coredump_mode = 0;
 
 #define REMOVE_USELESS_LOG 1
 
@@ -1640,8 +1641,8 @@ INT32 mtk_wcn_stp_dbg_log_ctrl(UINT32 on)
 
 INT32 mtk_wcn_stp_coredump_flag_ctrl(UINT32 on)
 {
-    STP_ENABLE_FW_COREDUMP(stp_core_ctx, on);
-	STP_INFO_FUNC("%s coredump function.\n", 0 == on ? "disable" : "enable")
+	STP_ENABLE_FW_COREDUMP(stp_core_ctx, on);
+	g_coredump_mode = on;
     return 0;
 }
 

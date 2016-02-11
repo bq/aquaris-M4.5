@@ -7,6 +7,7 @@
 #include <linux/mutex.h>
 #include <linux/rtpm_prio.h>
 #include <linux/types.h>
+#include <linux/ktime.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
 #include <linux/vmalloc.h>
@@ -361,6 +362,42 @@ static void _primary_path_unlock(const char* caller)
 	dprec_logger_done(DPREC_LOGGER_PRIMARY_MUTEX, 0, 0);
 }
 
+static DECLARE_WAIT_QUEUE_HEAD(display_state_wait_queue);
+
+static DISP_POWER_STATE primary_get_state()
+{
+	return pgc->state;
+}
+static DISP_POWER_STATE primary_set_state(DISP_POWER_STATE new_state)
+{
+	DISP_POWER_STATE old_state = pgc->state;
+	pgc->state = new_state;
+	DISPMSG("%s %d to %d\n", __func__, old_state, new_state);
+	wake_up(&display_state_wait_queue);
+	return old_state;
+}
+
+/* use MAX_SCHEDULE_TIMEOUT to wait for ever 
+ * NOTES: primary_path_lock should NOT be held when call this func !!!!!!!!
+ */
+#define __primary_display_wait_state(condition, timeout)			\
+({									\
+	wait_event_timeout(display_state_wait_queue, condition, timeout);\
+})
+
+long primary_display_wait_state(DISP_POWER_STATE state, long timeout)
+{
+	long ret;
+	ret = __primary_display_wait_state(primary_get_state()==state, timeout);
+	return ret;	
+}
+long primary_display_wait_not_state(DISP_POWER_STATE state, long timeout)
+{
+	long ret;
+	ret = __primary_display_wait_state(primary_get_state()!=state, timeout);
+	return ret;	
+}
+
 static void _primary_path_vsync_lock(void)
 {
 	mutex_lock(&(pgc->vsync_lock));
@@ -503,7 +540,7 @@ int primary_display_save_power_for_idle(int enter, unsigned int need_primary_loc
         _primary_path_lock(__func__);
     }
 
-	if(pgc->state == DISP_SLEEPED)
+	if (primary_get_state() == DISP_SLEEPED)
 	{
         DISPMSG("suspend mode can not enable low power. \n");
         goto end;
@@ -692,7 +729,7 @@ static int _disp_primary_path_idle_detect_thread(void* data)
             continue;
 		}
 		_primary_path_lock(__func__);
-		if(pgc->state == DISP_SLEEPED)
+		if(primary_get_state() != DISP_ALIVE)
 		{
 			MMProfileLogEx(ddp_mmp_get_events()->esd_check_t, MMProfileFlagPulse, 1, 0);
 			// DISPCHECK("[ddp_idle]primary display path is sleeped?? -- skip ddp_idle\n");
@@ -1566,9 +1603,11 @@ static unsigned long  get_current_time_us(void)
     return (t.tv_sec & 0xFFF) * 1000000 + t.tv_usec;
 }
 
+static struct hrtimer cmd_mode_update_timer;
+static ktime_t cmd_mode_update_timer_period;
+static int is_fake_timer_inited = 0;
 static enum hrtimer_restart _DISP_CmdModeTimer_handler(struct hrtimer *timer)
 {
-	DISPMSG("fake timer, wake up\n");
 	dpmgr_signal_event(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC);
 #if 0
 	if((get_current_time_us() - pgc->last_vsync_tick) > 16666)
@@ -1577,22 +1616,27 @@ static enum hrtimer_restart _DISP_CmdModeTimer_handler(struct hrtimer *timer)
 		pgc->last_vsync_tick = get_current_time_us();
 	}
 #endif
+	hrtimer_forward_now(timer, ns_to_ktime(16666666));
 		return HRTIMER_RESTART;
 }
 
 int _init_vsync_fake_monitor(int fps)
 {
-	static struct hrtimer cmd_mode_update_timer;
-	static ktime_t cmd_mode_update_timer_period;
+	if(is_fake_timer_inited)
+		return 0;
 
-	if(fps == 0)
-		fps = 60;
+	is_fake_timer_inited = 1;
+	
+	if(fps == 0) 
+	{
+		fps = 6000;
+	}
+	
+	hrtimer_init(&cmd_mode_update_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
+	cmd_mode_update_timer.function = _DISP_CmdModeTimer_handler;
+	hrtimer_start(&cmd_mode_update_timer, ns_to_ktime(16666666), HRTIMER_MODE_REL);
 
-       cmd_mode_update_timer_period = ktime_set(0 , 1000/fps*1000);
-        DISPMSG("[MTKFB] vsync timer_period=%d \n", 1000/fps);
-        hrtimer_init(&cmd_mode_update_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
-        cmd_mode_update_timer.function = _DISP_CmdModeTimer_handler;
-
+	DISPMSG("fake timer, init\n");
 	return 0;
 }
 #if 0
@@ -2277,6 +2321,20 @@ static int _DL_switch_to_DC_fast(void)
 
 	return ret;
 }
+
+
+static void modify_path_power_off_callback(uint32_t userdata)
+{
+    DDP_SCENARIO_ENUM old_scenario, new_scenario;
+	old_scenario = userdata >> 16;
+	new_scenario = userdata & ((1<<16)-1);
+	dpmgr_modify_path_power_off_old_modules(old_scenario, new_scenario, 0);
+
+    /* release output buffer */
+    int layer = disp_sync_get_output_interface_timeline_id();
+    mtkfb_release_layer_fence(primary_session_id, layer);
+}
+
 
 static int _DC_switch_to_DL_fast(void)
 {
@@ -3640,7 +3698,7 @@ int primary_display_esd_check(void)
 	MMProfileLogEx(ddp_mmp_get_events()->esd_check_t, MMProfileFlagStart, 0, 0);
 	DISPCHECK("[ESD]ESD check begin\n");
     _primary_path_lock(__func__);
-	if(pgc->state == DISP_SLEEPED)
+	if(primary_get_state() != DISP_ALIVE)
 	{
 		MMProfileLogEx(ddp_mmp_get_events()->esd_check_t, MMProfileFlagPulse, 1, 0);
 		DISPCHECK("[ESD]primary display path is sleeped?? -- skip esd check\n");
@@ -3988,7 +4046,7 @@ int primary_display_esd_recovery(void)
 
 
 	lcm_param = disp_lcm_get_params(pgc->plcm);
-	if(pgc->state == DISP_SLEEPED)
+	if(primary_get_state() != DISP_ALIVE)
 	{
 		DISPCHECK("[ESD]esd recovery but primary display path is sleeped??\n");
 		goto done;
@@ -4143,14 +4201,20 @@ static int _disp_primary_path_check_trigger(void *data)
 		MMProfileLogEx(ddp_mmp_get_events()->primary_display_aalod_trigger, MMProfileFlagPulse, 0, 0);
 
 		_primary_path_lock(__func__);
-		if(pgc->state != DISP_SLEEPED)
+		if(primary_get_state() == DISP_ALIVE)
 		{
 #ifdef MTK_DISP_IDLE_LP
             last_primary_trigger_time = sched_clock();
             _disp_primary_path_exit_idle(__func__, 0);
 #endif
 			cmdqRecReset(handle);
-			_cmdq_insert_wait_frame_done_token_mira(handle);
+
+#ifndef MTK_FB_CMDQ_DISABLE
+			if (primary_display_is_video_mode())
+				cmdqRecWaitNoClear(handle, CMDQ_EVENT_DISP_RDMA0_EOF);
+			else
+				cmdqRecWaitNoClear(handle, CMDQ_SYNC_TOKEN_STREAM_EOF);
+#endif
 
 			if(gResetOVLInAALTrigger==1)
 			{
@@ -4687,6 +4751,12 @@ static int _ovl_fence_release_callback(uint32_t userdata)
     {
         static cmdqRecHandle cmdq_handle = NULL;
         unsigned int rdma_pitch_sec, rdma_fmt;
+
+        if(primary_get_state() != DISP_ALIVE)
+		{
+            /* release interface fence */
+            return 0;
+        }
         if(cmdq_handle == NULL)
             ret = cmdqRecCreate(CMDQ_SCENARIO_PRIMARY_DISP,&cmdq_handle);
         if (ret == 0)
@@ -4891,14 +4961,16 @@ static int _present_fence_release_worker_thread(void *data)
             // if session not created, do not release present fence
             if(pgc->session_id==0)
             {
-                DISPDBG("_get_sync_info fail in present_fence_release thread \n");
+                MMProfileLogEx(ddp_mmp_get_events()->present_fence_release, MMProfileFlagPulse, -1, 0x4a4a4a4a);
+                //DISPDBG("_get_sync_info fail in present_fence_release thread \n");
                 continue;
             }
 
             layer_info = _get_sync_info(pgc->session_id, disp_sync_get_present_timeline_id());
             if(layer_info == NULL)
             {
-                DISPERR("_get_sync_info fail in present_fence_release thread \n");
+                MMProfileLogEx(ddp_mmp_get_events()->present_fence_release, MMProfileFlagPulse, -1, 0x5a5a5a5a);
+                //DISPERR("_get_sync_info fail in present_fence_release thread \n");
                 continue;
             }
 
@@ -5277,6 +5349,24 @@ int primary_display_init(char *lcm_name, unsigned int lcm_fps)
 //	dpmgr_path_init(pgc->dpmgr_handle, CMDQ_DISABLE);
 	dpmgr_path_set_video_mode(pgc->dpmgr_handle, primary_display_is_video_mode());
 //	dpmgr_path_init(pgc->dpmgr_handle, CMDQ_DISABLE);
+
+	// use fake timer to generate vsync signal for cmd mode w/o LCM(originally using LCM TE Signal as VSYNC)
+	// so we don't need to modify display driver's behavior.
+#if defined(DISP_HELPER_OPTION_NO_LCM_FOR_LOW_POWER_MEASUREMENT)
+	{
+		// only for low power measurement
+		DISPCHECK("WARNING!!!!!! FORCE NO LCM MODE!!!\n");
+		islcmconnected = 0;
+
+		// no need to change video mode vsync behavior
+		if(!primary_display_is_video_mode())
+		{
+			_init_vsync_fake_monitor(lcm_fps);
+		
+			dpmgr_map_event_to_irq(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC, DDP_IRQ_UNKNOW);
+		}
+	}
+#endif
 
 #ifdef CONFIG_FPGA_EARLY_PORTING
        dpmgr_path_reset(pgc->dpmgr_handle, CMDQ_DISABLE);
@@ -5709,6 +5799,25 @@ int primary_suspend_release_fence(void)
 	}
 	return 0;
 }
+
+static void primary_display_suspend_wait_tui()
+{
+	while(primary_get_state() == DISP_BLANK) {
+		_primary_path_vsync_unlock();
+		_primary_path_unlock(__func__);
+		_primary_path_esd_check_unlock();
+		disp_sw_mutex_unlock(&(pgc->capture_lock));
+
+		primary_display_wait_state(DISP_ALIVE, MAX_SCHEDULE_TIMEOUT);
+
+		disp_sw_mutex_lock(&(pgc->capture_lock));
+		_primary_path_esd_check_lock();
+		_primary_path_lock(__func__);
+		_primary_path_vsync_lock();
+		DISPCHECK("primary_display_suspend wait tui done stat=%d\n", primary_get_state());
+	}
+}
+
 int primary_display_suspend(void)
 {
 	DISP_STATUS ret = DISP_STATUS_OK;
@@ -5722,6 +5831,11 @@ int primary_display_suspend(void)
 	_primary_path_esd_check_lock();
 	_primary_path_lock(__func__);
 	_primary_path_vsync_lock();
+
+	DISPCHECK("wait tui finish[begin]\n");
+	primary_display_suspend_wait_tui();
+	DISPCHECK("wait tui finish[end]\n");
+
 	if(pgc->state == DISP_SLEEPED)
 	{
 		DISPCHECK("primary display path is already sleep, skip\n");
@@ -6066,6 +6180,26 @@ int primary_display_resume(void)
 	DISPCHECK("[POWER]wait frame done[begin]\n");
 	dpmgr_wait_event_timeout(pgc->dpmgr_handle, DISP_PATH_EVENT_FRAME_DONE, HZ/10);
 	DISPCHECK("[POWER]wait frame done[end]\n");
+
+	// reinit fake timer for debug, we can enable option then press powerkey to enable thsi feature.
+	// use fake timer to generate vsync signal for cmd mode w/o LCM(originally using LCM TE Signal as VSYNC)
+	// so we don't need to modify display driver's behavior.
+#if defined(DISP_HELPER_OPTION_NO_LCM_FOR_LOW_POWER_MEASUREMENT)
+	{
+		// only for low power measurement
+		DISPCHECK("WARNING!!!!!! FORCE NO LCM MODE!!!\n");
+		islcmconnected = 0;
+
+		// no need to change video mode vsync behavior
+		if(!primary_display_is_video_mode())
+		{
+			_init_vsync_fake_monitor(pgc->lcm_fps);
+		
+			dpmgr_map_event_to_irq(pgc->dpmgr_handle, DISP_PATH_EVENT_IF_VSYNC, DDP_IRQ_UNKNOW);
+		}
+	}
+#endif
+
 #if 0
 	DISPCHECK("[POWER]wakeup aal/od trigger process[begin]\n");
 	wake_up_process(primary_path_aal_task);
@@ -6075,6 +6209,7 @@ int primary_display_resume(void)
 
 done:
 	_primary_path_unlock(__func__);
+	
 	//primary_display_diagnose();
 	aee_kernel_wdt_kick_Powkey_api("mtkfb_late_resume", WDT_SETBY_Display);
 	MMProfileLogEx(ddp_mmp_get_events()->primary_resume, MMProfileFlagEnd, 0, 0);
@@ -6952,7 +7087,7 @@ int primary_display_config_input_multiple(disp_session_input_config *session_inp
 
 	_primary_path_lock(__func__);
 
-	if (pgc->state == DISP_SLEEPED && DISP_SESSION_TYPE(session_input->session_id) != DISP_SESSION_MEMORY){
+	if (primary_get_state() == DISP_SLEEPED && DISP_SESSION_TYPE(session_input->session_id) != DISP_SESSION_MEMORY){
 		DISPMSG("%s, skip because primary dipslay is sleep\n", __func__);
 #ifdef CONFIG_SINGLE_PANEL_OUTPUT
 		primary_suspend_release_ovl_fence(session_input);
@@ -7073,7 +7208,11 @@ int primary_display_user_cmd(unsigned int cmd, unsigned long arg)
 #else
 	ret = cmdqRecCreate(CMDQ_SCENARIO_PRIMARY_DISP,&handle);
 	cmdqRecReset(handle);
-	_cmdq_insert_wait_frame_done_token_mira(handle);
+
+	if (primary_display_is_video_mode())
+		cmdqRecWaitNoClear(handle, CMDQ_EVENT_DISP_RDMA0_EOF);
+	else
+		cmdqRecWaitNoClear(handle, CMDQ_SYNC_TOKEN_STREAM_EOF);
 #endif
 	cmdqsize = cmdqRecGetInstructionCount(handle);
 
@@ -7141,6 +7280,11 @@ int primary_display_switch_mode(int sess_mode, unsigned int session, int force)
 	_primary_path_lock(__func__);
 
     MMProfileLogEx(ddp_mmp_get_events()->primary_switch_mode, MMProfileFlagStart, pgc->session_mode, sess_mode);
+
+	if (primary_get_state() == DISP_BLANK)
+	{
+		sess_mode = DISP_SESSION_DECOUPLE_MODE;
+	}
 
 	if(pgc->session_mode == sess_mode)
 	{
@@ -8050,8 +8194,6 @@ int primary_display_capture_framebuffer_decouple(unsigned long pbuf, unsigned in
     	goto out;
 	}
 
-	_primary_path_lock(__func__);
-
 //	mva = pgc->dc_buf[pgc->dc_buf_id];
 	pconfig = dpmgr_path_get_last_config(pgc->dpmgr_handle);
 
@@ -8072,7 +8214,6 @@ int primary_display_capture_framebuffer_decouple(unsigned long pbuf, unsigned in
 	buffer_size = h_yres*pitch;
 	ASSERT((pitch/4)>=w_xres);
 //	dpmgr_get_input_address(pgc->dpmgr_handle,&mva);
-	_primary_path_unlock(__func__);
 	m4u_mva_map_kernel(mva, buffer_size, &va, &mapped_size);
 	if(!va)
 	{
@@ -8129,11 +8270,18 @@ int primary_display_capture_framebuffer_ovl(unsigned long pbuf, unsigned int for
 	DISPMSG("primary capture: begin\n");
 
     disp_sw_mutex_lock(&(pgc->capture_lock));
+    _primary_path_lock(__func__);
 
-    if (primary_display_is_sleepd()|| !primary_display_cmdq_enabled())
+    if (pgc->state == DISP_SLEEPED)
     {
         memset((void*)pbuf, 0,buffer_size);
-		DISPMSG("primary capture:fill black\n");
+		DISPMSG("primary capture:fill black for sleep \n");
+        goto out;
+    }
+    if (!primary_display_cmdq_enabled())
+    {
+        memset((void*)pbuf, 0,buffer_size);
+		DISPMSG("primary capture:fill black for cmdq disabled \n");
         goto out;
     }
 
@@ -8195,7 +8343,6 @@ int primary_display_capture_framebuffer_ovl(unsigned long pbuf, unsigned int for
 		_cmdq_insert_wait_frame_done_token_mira(cmdq_handle);
 		dpmgr_path_memout_clock(pgc->dpmgr_handle, 1);
 
-		_primary_path_lock(__func__);
 		pconfig = dpmgr_path_get_last_config(pgc->dpmgr_handle);
 		pconfig->wdma_dirty 					= 1;
 		pconfig->wdma_config.dstAddress 		= mva;
@@ -8226,7 +8373,6 @@ int primary_display_capture_framebuffer_ovl(unsigned long pbuf, unsigned int for
 
 		ret = dpmgr_path_config(pgc->dpmgr_handle, pconfig, cmdq_handle);
 		pconfig->wdma_dirty  = 0;
-		_primary_path_unlock(__func__);
 		_cmdq_set_config_handle_dirty_mira(cmdq_handle);
 		_cmdq_flush_config_handle_mira(cmdq_handle, 0);
 		DISPMSG("primary capture:Flush add memout mva(0x%x)\n",mva);
@@ -8239,10 +8385,8 @@ int primary_display_capture_framebuffer_ovl(unsigned long pbuf, unsigned int for
 
 		cmdqRecReset(cmdq_handle);
 		_cmdq_insert_wait_frame_done_token_mira(cmdq_handle);
-		_primary_path_lock(__func__);
 		dpmgr_path_remove_memout(pgc->dpmgr_handle, cmdq_handle);
         cmdqRecClearEventToken(cmdq_handle,CMDQ_EVENT_DISP_WDMA0_SOF);
-		_primary_path_unlock(__func__);
 		_cmdq_set_config_handle_dirty_mira(cmdq_handle);
 		//flush remove memory to cmdq
 		_cmdq_flush_config_handle_mira(cmdq_handle, 1);
@@ -8261,6 +8405,7 @@ out:
     if(m4uClient != 0)
 	    m4u_destroy_client(m4uClient);
 
+	_primary_path_unlock(__func__);
 	disp_sw_mutex_unlock(&(pgc->capture_lock));
 	DISPMSG("primary capture: end\n");
 
@@ -9216,4 +9361,79 @@ done:
 	_primary_path_unlock(__func__);
 	DISPCHECK("[display_test]Display test[End]\n");
 	return ret;
+}
+
+static DISP_POWER_STATE tui_power_stat_backup;
+static int tui_session_mode_backup;
+
+int display_enter_tui()
+{
+	int ret;
+	
+	msleep(500);
+	DISPMSG("TDDP: %s\n", __func__);
+
+	MMProfileLogEx(ddp_mmp_get_events()->tui, MMProfileFlagStart, 0, 0);
+
+	_primary_path_lock(__func__);
+
+	if(primary_get_state() != DISP_ALIVE) {
+		DISPERR("Can't enter tui: current_stat=%d is not alive\n", primary_get_state());
+		goto err0;
+	}
+	
+	tui_power_stat_backup = primary_set_state(DISP_BLANK);
+
+	if(primary_display_is_mirror_mode()) {
+		DISPERR("Can't enter tui: current_mode=%s\n", session_mode_spy(pgc->session_mode));
+		goto err1;
+	}
+
+#ifdef MTK_DISP_IDLE_LP
+	_disp_primary_path_exit_idle(__func__, 0);
+#endif
+	tui_session_mode_backup = pgc->session_mode;
+	primary_display_switch_mode_nolock(DISP_SESSION_DECOUPLE_MODE, pgc->session_id, 0);
+
+	MMProfileLogEx(ddp_mmp_get_events()->tui, MMProfileFlagPulse, 0, 1);
+	//DISP_REG_SET(NULL, DISP_REG_RDMA_INT_ENABLE, 0x0);
+	_primary_path_unlock(__func__);
+	return 0;
+	
+err2:
+	primary_display_switch_mode_nolock(tui_session_mode_backup, pgc->session_id, 0);
+
+err1:
+	primary_set_state(tui_power_stat_backup);
+
+err0:
+	MMProfileLogEx(ddp_mmp_get_events()->tui, MMProfileFlagEnd, 0, 0);
+	_primary_path_unlock(__func__);
+
+	return -1;
+}
+
+int display_exit_tui()
+{
+	
+	MMProfileLogEx(ddp_mmp_get_events()->tui, MMProfileFlagPulse, 1, 1);
+
+	_primary_path_lock(__func__);
+
+	primary_set_state(tui_power_stat_backup);
+
+	/* trigger rdma to display last normal buffer */
+	//_decouple_update_rdma_config_nolock();
+	/*workaround: wait untill this frame triggered to lcm */
+	msleep(32);
+	primary_display_switch_mode_nolock(tui_session_mode_backup, pgc->session_id, 0);
+	//DISP_REG_SET(NULL, DISP_REG_RDMA_INT_ENABLE, 0xffffffff);
+
+	_primary_path_unlock(__func__);
+
+	MMProfileLogEx(ddp_mmp_get_events()->tui, MMProfileFlagEnd, 0, 0);
+	DISPMSG("TDDP: %s\n", __func__);
+
+	return 0;
+	
 }

@@ -36,6 +36,13 @@
 #endif
 
 extern struct tpd_device *tpd;
+extern int mt_eint_set_deint(int eint_num, int irq_num);
+
+static int tpd_tui_flag = 0;
+static int tpd_tui_low_power_skipped = 0;
+DEFINE_MUTEX(tui_lock);
+
+
 int irq_flag = 1;//1 enable,0 disable,touch_panel_eint default status, need to confirm after register eint
 static int power_flag=0;// 0 power off,default, 1 power on
 static int tpd_flag = 0;
@@ -472,11 +479,14 @@ static int tpd_irq_registration(void)
 	struct device_node *node = NULL;
 	int ret = 0;
 	u32 ints[2] = {0,0};
+	u32 intr[2] = {0,0};
+
 	GTP_INFO("Device Tree Tpd_irq_registration!");
 	
 	node = of_find_compatible_node(NULL, NULL, "mediatek, TOUCH_PANEL-eint");
 	if(node){
 		of_property_read_u32_array(node , "debounce", ints, ARRAY_SIZE(ints));
+		of_property_read_u32_array(node , "interrupts", intr, ARRAY_SIZE(intr));
 		gpio_set_debounce(ints[0], ints[1]);
 
 		touch_irq = irq_of_parse_and_map(node, 0);
@@ -503,9 +513,27 @@ static int tpd_irq_registration(void)
 		GTP_ERROR("tpd request_irq can not find touch eint device node!.");
 		ret = -1;
 	}
-	GTP_INFO("[%s]irq:%d, debounce:%d-%d:", __FUNCTION__, touch_irq, ints[0], ints[1]);
+
+	//mt_eint_set_deint(10, 189);
+	//ret = request_irq(189, (irq_handler_t)tpd_eint_interrupt_handler, EINTF_TRIGGER_FALLING, "TOUCH_PANEL-eint", NULL);
+
+	GTP_INFO("[%s]irq:%d, debounce:%d-%d:, interrupts:%d-%d\n", __FUNCTION__, touch_irq, ints[0], ints[1], intr[0], intr[1]);
 	return ret;
 }
+
+int tpd_reregister_from_tui(void)
+{
+	int ret = 0;
+	free_irq(touch_irq, NULL);
+	
+	ret = tpd_irq_registration();
+	if(ret < 0){
+	    ret = -1;
+	    GTP_ERROR("tpd request_irq IRQ LINE NOT AVAILABLE!.");
+	}	
+	return ret;
+}
+
 #endif
 static int tpd_registration(struct i2c_client *client)
 {
@@ -977,6 +1005,16 @@ static void tpd_suspend(struct early_suspend *h)
 #endif
 	GTP_INFO("TPD suspend start...");
 
+
+	mutex_lock(&tui_lock);
+	if (tpd_tui_flag) {
+		GTP_INFO("[TPD] skip tpd_suspend due to TUI in used\n");
+		tpd_tui_low_power_skipped = 1;
+		mutex_unlock(&tui_lock);
+		return;
+	} 
+	mutex_unlock(&tui_lock);
+
 #if GTP_PROXIMITY
 	if (gt1x_proximity_flag == 1) {
 		GTP_INFO("Suspend: proximity is detected!");
@@ -1093,6 +1131,32 @@ static struct tpd_driver_t tpd_device_driver = {
 	.tpd_have_button = 0,
 #endif
 };
+
+int tpd_enter_tui(void)
+{
+	int ret = 0;
+	tpd_tui_flag = 1;
+	GTP_INFO("[%s] enter tui", __FUNCTION__);
+	return ret;
+}
+
+int tpd_exit_tui(void)
+{
+	int ret = 0;
+	GTP_INFO("[%s] exit TUI+", __FUNCTION__);
+	mutex_lock(&tui_lock);
+	tpd_tui_flag = 0;
+	mutex_unlock(&tui_lock);
+	if (tpd_tui_low_power_skipped) {
+		tpd_tui_low_power_skipped = 0;
+		GTP_INFO("[%s] do low power again+", __FUNCTION__);
+		tpd_suspend(NULL);
+		GTP_INFO("[%s] do low power again-", __FUNCTION__);
+	}
+	GTP_INFO("[%s] exit TUI-", __FUNCTION__);
+	return ret;
+}
+
 
 void tpd_off(void)
 {

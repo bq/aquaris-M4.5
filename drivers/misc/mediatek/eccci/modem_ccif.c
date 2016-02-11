@@ -207,7 +207,7 @@ static int ccif_rx_collect(struct md_ccif_queue *queue, int budget,int blocking,
             goto OUT;
         }
         if(IS_PASS_SKB(md,qno)){
-            skb = ccci_alloc_skb(pkg_size,0);
+            skb = ccci_alloc_skb(pkg_size,0, 0);
             if(skb == NULL){
                 ret= -ENOMEM;
                 goto OUT;

@@ -28,6 +28,11 @@
 
 #if (CFG_SUPPORT_STATISTICS == 1)
 
+enum EVENT_TYPE {
+	EVENT_RX,
+	EVENT_TX,
+	EVENT_TX_DONE
+};
 /*******************************************************************************
 *						C O N S T A N T S
 ********************************************************************************
@@ -1175,6 +1180,255 @@ StatsEnvTxTime2Hif(
 	}
 }
 
+static VOID statsParsePktInfo(PUINT_8 pucPkt, UINT_8 status, UINT_8 eventType, P_MSDU_INFO_T prMsduInfo)
+{
+	/* get ethernet protocol */
+	UINT_16 u2EtherType = (pucPkt[ETH_TYPE_LEN_OFFSET] << 8) | (pucPkt[ETH_TYPE_LEN_OFFSET + 1]);
+	PUINT_8 pucEthBody = &pucPkt[ETH_HLEN];
+
+	switch (u2EtherType) {
+	case ETH_P_ARP:
+	{
+		UINT_16 u2OpCode = (pucEthBody[6] << 8) | pucEthBody[7];
+
+		switch (eventType) {
+		case EVENT_RX:
+			if (u2OpCode == ARP_PRO_REQ) {
+				DBGLOG(RX, INFO, ("<RX> Arp Req From IP: %d.%d.%d.%d\n",
+					pucEthBody[14], pucEthBody[15], pucEthBody[16], pucEthBody[17]));
+			} else if (u2OpCode == ARP_PRO_RSP) {
+				DBGLOG(RX, INFO, ("<RX> Arp Rsp from IP: %d.%d.%d.%d\n",
+					pucEthBody[14], pucEthBody[15], pucEthBody[16], pucEthBody[17]));
+			}
+			break;
+		case EVENT_TX:
+			if (u2OpCode == ARP_PRO_REQ) {
+				DBGLOG(TX, INFO, ("<TX> Arp Req to IP: %d.%d.%d.%d\n",
+					pucEthBody[24], pucEthBody[25], pucEthBody[26], pucEthBody[27]));
+			} else if (u2OpCode == ARP_PRO_RSP) {
+				DBGLOG(TX, INFO, ("<TX> Arp Rsp to IP: %d.%d.%d.%d\n",
+					pucEthBody[24], pucEthBody[25], pucEthBody[26], pucEthBody[27]));
+			}
+			prMsduInfo->fgNeedTxDoneStatus = TRUE;
+			prMsduInfo->fgIsBasicRate = TRUE;
+			break;
+		case EVENT_TX_DONE:
+			if (u2OpCode == ARP_PRO_REQ) {
+				DBGLOG(TX, INFO, ("<TX status:%d> Arp Req to IP: %d.%d.%d.%d\n", status,
+					pucEthBody[24], pucEthBody[25], pucEthBody[26], pucEthBody[27]));
+			} else if (u2OpCode == ARP_PRO_RSP) {
+				DBGLOG(TX, INFO, ("<TX status:%d> Arp Rsp to IP: %d.%d.%d.%d\n", status,
+					pucEthBody[24], pucEthBody[25], pucEthBody[26], pucEthBody[27]));
+			}
+			break;
+		}
+		break;
+	}
+	case ETH_P_IP:
+	{
+		UINT_8 ucIpProto = pucEthBody[9]; /* IP header without options */
+		UINT_8 ucIpVersion = (pucEthBody[0] & IPVH_VERSION_MASK) >> IPVH_VERSION_OFFSET;
+		UINT_16 u2IpId = pucEthBody[4]<<8 | pucEthBody[5];
+		if (ucIpVersion != IPVERSION)
+			break;
+		switch (ucIpProto) {
+		case IP_PRO_ICMP:
+		{
+			/* the number of ICMP packets is seldom so we print log here */
+			UINT_8 ucIcmpType;
+			UINT_16 u2IcmpId, u2IcmpSeq;
+			PUINT_8 pucIcmp = &pucEthBody[20];
+
+			ucIcmpType = pucIcmp[0];
+			if (ucIcmpType == 3) /* don't log network unreachable packet */
+				break;
+			u2IcmpId = *(UINT_16 *) &pucIcmp[4];
+			u2IcmpSeq = *(UINT_16 *) &pucIcmp[6];
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG(RX, INFO, ("<RX> ICMP: Type %d, Id BE 0x%04x, Seq BE 0x%04x\n",
+							ucIcmpType, u2IcmpId, u2IcmpSeq));
+				break;
+			case EVENT_TX:
+				DBGLOG(TX, INFO, ("<TX> ICMP: Type %d, Id 0x04%x, Seq BE 0x%04x\n",
+								ucIcmpType, u2IcmpId, u2IcmpSeq));
+				prMsduInfo->fgNeedTxDoneStatus = TRUE;
+				break;
+			case EVENT_TX_DONE:
+				DBGLOG(TX, INFO, ("<TX status:%d> Type %d, Id 0x%04x, Seq 0x%04x\n",
+						status, ucIcmpType, u2IcmpId, u2IcmpSeq));
+				break;
+			}
+			break;
+		}
+		case IP_PRO_UDP:
+		{
+			/* the number of DHCP packets is seldom so we print log here */
+			PUINT_8 pucUdp = &pucEthBody[20];
+			PUINT_8 pucUdpPayload = &pucUdp[8];
+			UINT_16 u2UdpDstPort;
+			UINT_16 u2UdpSrcPort;
+
+			u2UdpDstPort = (pucUdp[2] << 8) | pucUdp[3];
+			u2UdpSrcPort = (pucUdp[0] << 8) | pucUdp[1];
+			/* dhcp */
+			if ((u2UdpDstPort == UDP_PORT_DHCPS) || (u2UdpDstPort == UDP_PORT_DHCPC)) {
+				UINT_32 u4TransID = pucUdpPayload[4]<<24 | pucUdpPayload[5]<<16 |
+						pucUdpPayload[6]<<8  | pucUdpPayload[7];
+
+				switch (eventType) {
+				case EVENT_RX:
+					DBGLOG(RX, INFO, ("<RX> DHCP: IPID 0x%02x, MsgType 0x%x, TransID 0x%08x\n",
+									u2IpId, pucUdpPayload[0], u4TransID));
+					break;
+				case EVENT_TX:
+					DBGLOG(TX, INFO, ("<TX> DHCP: IPID 0x%02x, MsgType 0x%x, TransID 0x%08x\n",
+									u2IpId, pucUdpPayload[0], u4TransID));
+					prMsduInfo->fgNeedTxDoneStatus = TRUE;
+					prMsduInfo->fgIsBasicRate = TRUE;
+					break;
+				case EVENT_TX_DONE:
+					DBGLOG(TX, INFO,
+						("<TX status:%d> DHCP: IPID 0x%02x, MsgType 0x%x, TransID 0x%08x\n",
+							status, u2IpId, pucUdpPayload[0], u4TransID));
+					break;
+				}
+			} else if (u2UdpDstPort == UDP_PORT_DNS) { /* tx dns */
+				UINT_16 u2TransId = (pucUdpPayload[0] << 8) | pucUdpPayload[1];
+
+				if (eventType == EVENT_TX) {
+					DBGLOG(TX, INFO, ("<TX> DNS: IPID 0x%02x, TransID 0x%04x\n", u2IpId, u2TransId));
+					prMsduInfo->fgNeedTxDoneStatus = TRUE;
+					prMsduInfo->fgIsBasicRate = TRUE;
+				} else if (eventType == EVENT_TX_DONE)
+					DBGLOG(TX, INFO, ("<TX status:%d> DNS: IPID 0x%02x, TransID 0x%04x\n",
+							status, u2IpId, u2TransId));
+			} else if (u2UdpSrcPort == UDP_PORT_DNS && eventType == EVENT_RX) { /* rx dns */
+				UINT_16 u2TransId = (pucUdpPayload[0] << 8) | pucUdpPayload[1];
+
+				DBGLOG(RX, INFO, ("<RX> DNS: IPID 0x%02x, TransID 0x%04x\n", u2IpId, u2TransId));
+			} else {
+				switch (eventType) {
+				case EVENT_RX:
+					DBGLOG(RX, TRACE, ("<RX> UDP: IPID 0x%04x\n", u2IpId));
+					break;
+				case EVENT_TX:
+					DBGLOG(TX, TRACE, ("<TX> UDP: IPID 0x%04x\n", u2IpId));
+					prMsduInfo->fgNeedTxDoneStatus = TRUE;
+					break;
+				case EVENT_TX_DONE:
+					DBGLOG(TX, TRACE, ("<TX status:%d> UDP: IPID 0x%04x\n", status, u2IpId));
+					break;
+				}
+			}
+			break;
+		}
+		case IP_PRO_TCP:
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG(RX, TRACE, ("<RX> TCP: IPID 0x%04x\n", u2IpId));
+				break;
+			case EVENT_TX:
+				DBGLOG(TX, TRACE, ("<TX> TCP: IPID 0x%04x\n", u2IpId));
+				prMsduInfo->fgNeedTxDoneStatus = TRUE;
+				break;
+			case EVENT_TX_DONE:
+				DBGLOG(TX, TRACE, ("<TX status:%d> TCP: IPID 0x%04x\n", status, u2IpId));
+				break;
+			}
+			break;
+		}
+		break;
+	}
+	case ETH_P_PRE_1X:
+		DBGLOG(RX, INFO, ("pre-1x\n"));
+	case ETH_P_1X:
+	{
+		PUINT_8 pucEapol = pucEthBody;
+		UINT_8 ucEapolType = pucEapol[1];
+		switch (ucEapolType) {
+		case 0: /* eap packet */
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG(RX, INFO, ("<RX> EAP Packet: code %d, id %d, type %d\n",
+						pucEapol[4], pucEapol[5], pucEapol[7]));
+				break;
+			case EVENT_TX:
+				DBGLOG(TX, INFO, ("<TX> EAP Packet: code %d, id %d, type %d\n",
+						pucEapol[4], pucEapol[5], pucEapol[7]));
+				break;
+			case EVENT_TX_DONE:
+				DBGLOG(TX, INFO, ("<TX status: %d> EAP Packet: code %d, id %d, type %d\n",
+						status, pucEapol[4], pucEapol[5], pucEapol[7]));
+				break;
+			}
+			break;
+		case 1: /* eapol start */
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG(RX, INFO, ("<RX> EAPOL: start\n"));
+				break;
+			case EVENT_TX:
+				DBGLOG(TX, INFO, ("<RX> EAPOL: start\n"));
+				break;
+			case EVENT_TX_DONE:
+				DBGLOG(TX, INFO, ("<TX status: %d> EAPOL: start\n", status));
+				break;
+			}
+			break;
+		case 3: /* key */
+		{
+			UINT_16 u2KeyInfo = pucEapol[5]<<8 | pucEapol[6];
+			switch (eventType) {
+			case EVENT_RX:
+				DBGLOG(RX, INFO,
+					("<RX> EAPOL: key, KeyInfo 0x%04x, Nonce %02x%02x%02x%02x%02x%02x%02x%02x...\n",
+					u2KeyInfo, pucEapol[17], pucEapol[18], pucEapol[19], pucEapol[20],
+					pucEapol[21], pucEapol[22], pucEapol[23], pucEapol[24]));
+				break;
+			case EVENT_TX:
+				DBGLOG(TX, INFO,
+					("<TX> EAPOL: key, KeyInfo 0x%04x, Nonce %02x%02x%02x%02x%02x%02x%02x%02x...\n",
+					u2KeyInfo,
+					pucEapol[17], pucEapol[18], pucEapol[19], pucEapol[20],
+					pucEapol[21], pucEapol[22], pucEapol[23], pucEapol[24]));
+				break;
+			case EVENT_TX_DONE:
+				DBGLOG(TX, INFO,
+					("<TX status: %d> EAPOL: key, KeyInfo 0x%04x, Nonce %02x%02x%02x%02x%02x%02x%02x%02x...\n",
+					status, u2KeyInfo, pucEapol[17], pucEapol[18], pucEapol[19],
+					pucEapol[20], pucEapol[21], pucEapol[22], pucEapol[23], pucEapol[24]));
+				break;
+			}
+
+			break;
+		}
+		}
+		break;
+	}
+	case ETH_WPI_1X:
+	{
+		UINT_8 ucSubType = pucEthBody[3]; /* sub type filed*/
+		UINT_16 u2Length = *(PUINT_16)&pucEthBody[6];
+		UINT_16 u2Seq = *(PUINT_16)&pucEthBody[8];
+		switch (eventType) {
+		case EVENT_RX:
+			DBGLOG(RX, INFO, ("<RX> WAPI: subType %d, Len %d, Seq %d\n",
+					ucSubType, u2Length, u2Seq));
+			break;
+		case EVENT_TX:
+			DBGLOG(TX, INFO, ("<TX> WAPI: subType %d, Len %d, Seq %d\n",
+					ucSubType, u2Length, u2Seq));
+			break;
+		case EVENT_TX_DONE:
+			DBGLOG(TX, INFO, ("<TX status: %d> WAPI: subType %d, Len %d, Seq %d\n",
+					status, ucSubType, u2Length, u2Seq));
+			break;
+		}
+		break;
+	}
+	}
+}
 
 /*----------------------------------------------------------------------------*/
 /*! \brief  This routine is called to display rx packet information.
@@ -1185,88 +1439,10 @@ StatsEnvTxTime2Hif(
 * \retval None
 */
 /*----------------------------------------------------------------------------*/
-VOID
-StatsRxPktInfoDisplay(
-	UINT_8								*pPkt
-	)
+VOID StatsRxPktInfoDisplay(UINT_8 *pPkt)
 {
-	PUINT_8 pucIpHdr = &pPkt[ETH_HLEN];
-	UINT_8 ucIpVersion;
-	UINT_16 u2EtherTypeLen;
-
-
-	/* get ethernet protocol */
-	u2EtherTypeLen = (pPkt[ETH_TYPE_LEN_OFFSET] << 8) | (pPkt[ETH_TYPE_LEN_OFFSET+1]);
-
-#if 0 /* carefully! too many ARP */   
-	if (pucIpHdr[0] == 0x00) /* ARP */
-	{
-		UINT_8 *pucDstIp = (UINT_8 *) pucIpHdr;
-		if (pucDstIp[7] == ARP_PRO_REQ)
-		{
-			DBGLOG(INIT, TRACE, ("<rx> OS rx a arp req from %d.%d.%d.%d\n",
-				pucDstIp[14], pucDstIp[15], pucDstIp[16], pucDstIp[17]));
-		}
-		else if (pucDstIp[7] == ARP_PRO_RSP)
-		{
-			DBGLOG(INIT, TRACE, ("<rx> OS rx a arp rsp from %d.%d.%d.%d\n",
-				pucDstIp[24], pucDstIp[25], pucDstIp[26], pucDstIp[27]));
-		}
-	}
-#endif
-
-	if (u2EtherTypeLen == ETH_P_IP)
-	{
-		ucIpVersion = (pucIpHdr[0] & IPVH_VERSION_MASK) >> IPVH_VERSION_OFFSET;
-
-		if (ucIpVersion == IPVERSION) {
-			UINT_8 ucIpPro;
-			/* Get the DSCP value from the header of IP packet. */
-
-			/* ICMP */
-			ucIpPro = pucIpHdr[9]; /* IP header without options */
-			if (ucIpPro == IP_PRO_ICMP)
-			{
-				/* the number of ICMP packets is seldom so we print log here */
-				UINT_8 ucIcmpType;
-				UINT_16 u2IcmpId;
-
-				ucIcmpType = pucIpHdr[20];
-				u2IcmpId = *(UINT_16 *)&pucIpHdr[26];
-				DBGLOG(INIT, TRACE, ("<rx> OS rx a icmp: %d (0x%x)\n",
-					ucIcmpType, u2IcmpId));
-			}
-			else
-			/* DHCP */
-			if (ucIpPro == IP_PRO_UDP)
-			{
-				/* the number of DHCP packets is seldom so we print log here */
-				UINT_8 ucUdpDstPort;
-				UINT_8 ucDhcpOp;
-				UINT_16 u2IpId;
-
-				if (pucIpHdr[22] == 0x00)
-				{
-					ucUdpDstPort = pucIpHdr[23];
-
-					if ((ucUdpDstPort == UDP_PORT_DHCPS) ||
-						(ucUdpDstPort == UDP_PORT_DHCPC))
-					{
-						u2IpId = *(UINT_16 *)&pucIpHdr[4];
-						ucDhcpOp = pucIpHdr[28];
-						DBGLOG(INIT, TRACE, ("<rx> OS rx a dhcp: %d (0x%x)\n",
-							ucDhcpOp, u2IpId));
-					}
-				}
-			}
-		}
-	}
-	else if (u2EtherTypeLen == ETH_P_1X)
-	{
-		DBGLOG(INIT, TRACE, ("<rx> OS rx a EAPOL\n"));
-	}
+	statsParsePktInfo(pPkt, 0, EVENT_RX, NULL);
 }
-
 
 /*----------------------------------------------------------------------------*/
 /*! \brief  This routine is called to display tx packet information.
@@ -1277,91 +1453,13 @@ StatsRxPktInfoDisplay(
 * \retval None
 */
 /*----------------------------------------------------------------------------*/
-VOID
-StatsTxPktInfoDisplay(
-	UINT_8								*pPkt,
-	PBOOLEAN							pfgIsNeedAck
-	)
+VOID StatsTxPktCallBack(UINT_8 *pPkt, P_MSDU_INFO_T prMsduInfo)
 {
-	PUINT_8 pucIpHdr = &pPkt[ETH_HLEN];
-	UINT_8 ucIpVersion;
 	UINT_16 u2EtherTypeLen;
 
-
-	*pfgIsNeedAck = FALSE;
 	u2EtherTypeLen = (pPkt[ETH_TYPE_LEN_OFFSET] << 8) | (pPkt[ETH_TYPE_LEN_OFFSET + 1]);
-	
-#if 0
-	if (u2EtherTypeLen == ETH_P_ARP)
-	{
-		UINT_8 *pucDstIp = &aucLookAheadBuf[ETH_HLEN];
-		if (pucDstIp[7] == ARP_PRO_REQ)
-		{
-			DBGLOG(INIT, TRACE, ("<tx> OS tx a arp req to %d.%d.%d.%d\n",
-				pucDstIp[24], pucDstIp[25], pucDstIp[26], pucDstIp[27]));
-		}
-		else if (pucDstIp[7] == ARP_PRO_RSP)
-		{
-			DBGLOG(INIT, TRACE, ("<tx> OS tx a arp rsp to %d.%d.%d.%d\n",
-				pucDstIp[14], pucDstIp[15], pucDstIp[16], pucDstIp[17]));
-		}
-	}
-#endif
-	
-	if (u2EtherTypeLen == ETH_P_IP)
-	{
-		ucIpVersion = (pucIpHdr[0] & IPVH_VERSION_MASK) >> IPVH_VERSION_OFFSET;
-
-		if (ucIpVersion == IPVERSION) {
-			UINT_8 ucIpPro;
-
-			/* ICMP */
-			ucIpPro = pucIpHdr[9]; /* IP header without options */
-			if (ucIpPro == IP_PRO_ICMP)
-			{
-				/* the number of ICMP packets is seldom so we print log here */
-				UINT_8 ucIcmpType;
-				UINT_16 u2IcmpId;
-
-				ucIcmpType = pucIpHdr[20];
-				u2IcmpId = *(UINT_16 *)&pucIpHdr[26];
-				DBGLOG(INIT, TRACE, ("<tx> OS tx a icmp: %d (0x%x)\n",
-					ucIcmpType, u2IcmpId));
-				*pfgIsNeedAck = TRUE;
-			}
-
-			/* DHCP */
-			if (ucIpPro == IP_PRO_UDP)
-			{
-				/* the number of DHCP packets is seldom so we print log here */
-				UINT_8 ucUdpDstPort;
-				UINT_8 ucDhcpOp;
-				UINT_16 u2IpId;
-
-				if (pucIpHdr[22] == 0x00)
-				{
-					ucUdpDstPort = pucIpHdr[23];
-
-					if ((ucUdpDstPort == UDP_PORT_DHCPS) ||
-						(ucUdpDstPort == UDP_PORT_DHCPC))
-					{
-						u2IpId = *(UINT_16 *)&pucIpHdr[4];
-						ucDhcpOp = pucIpHdr[28];
-						DBGLOG(INIT, TRACE, ("<tx> OS tx a dhcp: %d (0x%x)\n",
-							ucDhcpOp, u2IpId));
-						*pfgIsNeedAck = TRUE;
-					}
-				}
-			}
-		}
-
-		/* TODO(Kevin): Add TSPEC classifier here */
-	}
-	else if (u2EtherTypeLen == ETH_P_1X) { /* For Port Control */
-		DBGLOG(INIT, TRACE, ("<tx> OS tx a EAPOL 0x888e\n"));
-	}
+	statsParsePktInfo(pPkt, 0, EVENT_TX, prMsduInfo);
 }
-
 
 /*----------------------------------------------------------------------------*/
 /*! \brief  This routine is called to handle display tx packet tx done information.
@@ -1372,29 +1470,12 @@ StatsTxPktInfoDisplay(
 * \retval None
 */
 /*----------------------------------------------------------------------------*/
-VOID
-StatsTxPktDoneInfoDisplay(
-	ADAPTER_T							*prAdapter,
-	UINT_8								*pucEvtBuf
-	)
+VOID StatsTxPktDoneInfoDisplay(ADAPTER_T *prAdapter, UINT_8 *pucEvtBuf)
 {
-    EVENT_TX_DONE_STATUS_T *prTxDone;
-    UINT32 u4PktId;
+	EVENT_TX_DONE_STATUS_T *prTxDone;
 
-
-    prTxDone = (EVENT_TX_DONE_STATUS_T *)pucEvtBuf;
-    
-    DBGLOG(INIT, TRACE,("EVENT_ID_TX_DONE_STATUS PacketSeq:%u ucStatus: %u SN: %u\n",
-                    prTxDone->ucPacketSeq, prTxDone->ucStatus, prTxDone->u2SequenceNumber));
-
-    printk("[wlan] tx done packet= 0x");
-    for(u4PktId=0; u4PktId<200; u4PktId++)
-    {
-        if ((u4PktId & 0xF) == 0)
-            printk("\n");
-        printk("%02x ", prTxDone->aucPktBuf[u4PktId]);
-    }
-    printk("\n");
+	prTxDone = (EVENT_TX_DONE_STATUS_T *) pucEvtBuf;
+	statsParsePktInfo(&prTxDone->aucPktBuf[64], prTxDone->ucStatus, EVENT_TX_DONE, NULL);
 }
 
 #endif /* CFG_SUPPORT_STATISTICS */

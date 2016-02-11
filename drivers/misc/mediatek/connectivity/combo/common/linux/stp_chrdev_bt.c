@@ -28,7 +28,19 @@ MODULE_LICENSE("Dual BSD/GPL");
 #define BT_LOG_WARN                 1
 #define BT_LOG_ERR                  0
 
+#if 0
+#define COMBO_IOC_MAGIC        0xb0
+#define COMBO_IOCTL_FW_ASSERT  _IOWR(COMBO_IOC_MAGIC, 0, void*)
+#define COMBO_IOCTL_BT_IC_HW_VER  _IOWR(COMBO_IOC_MAGIC, 1, int)
+#define COMBO_IOCTL_BT_IC_FW_VER  _IOWR(COMBO_IOC_MAGIC, 2, int)
 #define COMBO_IOC_BT_HWVER           6
+#else
+#define COMBO_IOCTL_FW_ASSERT        2
+#define COMBO_IOCTL_BT_IC_HW_VER     3
+#define COMBO_IOCTL_BT_IC_FW_VER     4
+#define COMBO_IOC_BT_HWVER           5
+#define COMBO_IOC_BT_SET_PSM         6
+#endif
 
 #define COMBO_IOC_MAGIC        0xb0
 #define COMBO_IOCTL_FW_ASSERT  _IOWR(COMBO_IOC_MAGIC, 0, void*)
@@ -374,6 +386,10 @@ long BT_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	case COMBO_IOCTL_BT_IC_FW_VER:
 		return mtk_wcn_wmt_ic_info_get(WMTCHIN_FWVER);
 		break;
+	case COMBO_IOC_BT_SET_PSM:
+		BT_INFO_FUNC("BT Set PSM setting:%lu\n", arg);
+		mtk_wcn_wmt_psm_ctrl(arg);
+		break;
 	default:
 		retval = -EFAULT;
 		BT_DBG_FUNC("BT_ioctl(): unknown cmd (%d)\n", cmd);
@@ -381,6 +397,15 @@ long BT_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 	}
 
 	return retval;
+}
+long BT_compat_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	long ret;
+
+	BT_INFO_FUNC("cmd[0x%x]\n", cmd);
+	ret = BT_unlocked_ioctl(filp, cmd, arg);
+	
+	return ret;
 }
 
 static int BT_open(struct inode *inode, struct file *file)
@@ -467,6 +492,7 @@ struct file_operations BT_fops = {
 	.write = BT_write,
 /* .ioctl = BT_ioctl, */
 	.unlocked_ioctl = BT_unlocked_ioctl,
+	.compat_ioctl = BT_compat_ioctl,
 	.poll = BT_poll
 };
 

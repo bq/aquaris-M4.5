@@ -309,7 +309,12 @@ config MTK_SVP_RAM_DRAM_ADDR_LIMIT
 	depends on MTK_SVP
 
 config MTK_SVP_RAM_SIZE
-	int "MTK SVP RAM dram buffer size"
+	int "MTK SVP RAM dram buffer size in MB"
 	depends on MTK_SVP
+
+config MTK_TUI_RAM_SIZE
+	int "MTK TUI SVP RAM dram buffer size in MB"
+	depends on MTK_SVP
+	default 0
 
 endmenu

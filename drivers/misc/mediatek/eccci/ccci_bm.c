@@ -74,15 +74,15 @@ static inline struct sk_buff *__alloc_skb_from_pool(int size)
 	return skb;
 }
 
-static inline struct sk_buff *__alloc_skb_from_kernel(int size)
+static inline struct sk_buff *__alloc_skb_from_kernel(int size, gfp_t gfp_mask)
 {
 	struct sk_buff *skb = NULL;
 	if(size > SKB_1_5K) {
-		skb = dev_alloc_skb(SKB_4K);
+		skb = __dev_alloc_skb(SKB_4K, gfp_mask);
 	} else if(size > SKB_16) {
-		skb = dev_alloc_skb(SKB_1_5K);
+		skb = __dev_alloc_skb(SKB_1_5K, gfp_mask);
 	} else if(size > 0) {
-		skb = dev_alloc_skb(SKB_16);
+		skb = __dev_alloc_skb(SKB_16, gfp_mask);
 	}
 	if(!skb)
 		CCCI_ERR_MSG(-1, BM, "%ps alloc skb from kernel fail, size=%d\n", __builtin_return_address(0), size);
@@ -90,29 +90,34 @@ static inline struct sk_buff *__alloc_skb_from_kernel(int size)
 }
 
 // may return NULL, caller should check, network should always use blocking as we do not want it consume our own pool
-struct sk_buff *ccci_alloc_skb(int size, char blocking)
+struct sk_buff *ccci_alloc_skb(int size, char frompool, char blocking)
 {
 	int count = 0;
 	struct sk_buff *skb = NULL;
 
 	if(size>SKB_4K || size<0)
 		goto err_exit;
-	skb = blocking?NULL:__alloc_skb_from_kernel(size);
-	
-	if(!skb) {
+
+	if (frompool) {
 slow_retry:
 		skb = __alloc_skb_from_pool(size);
-	}
-	if(unlikely(!skb)) {
-		if(blocking) {
-			CCCI_INF_MSG(-1, BM, "skb pool is empty! size=%d (%d)\n", size, count++);
-			msleep(100);
-			goto slow_retry;
-		} else {
-fast_retry:
-			skb = __alloc_skb_from_kernel(size);
-			if(!skb && count++<20)
-				goto fast_retry;
+
+		if(unlikely(!skb)) {
+			if (blocking) {
+				CCCI_INF_MSG(-1, BM, "skb pool is empty! size=%d (%d)\n", size, count++);
+				msleep(100);
+				goto slow_retry;
+			}
+		}
+	} /*fromkernel*/
+	else {
+		if (blocking) {
+			skb = __alloc_skb_from_kernel(size, GFP_KERNEL);
+		}
+		else {
+			/*NAPI*/
+			while (!skb && count++<20)
+				skb = __alloc_skb_from_kernel(size, GFP_ATOMIC);
 		}
 	}
 err_exit:
@@ -246,7 +251,7 @@ retry:
 	spin_unlock_irqrestore(&req_pool_lock, flags);
 	if(req) {
 		if(size>0) {
-			req->skb = ccci_alloc_skb(size, blk1);
+			req->skb = ccci_alloc_skb(size, 1, blk1);
 			req->policy = RECYCLE;
 			if(req->skb)
 				CCCI_DBG_MSG(-1, BM, "alloc ok, req=%p skb=%p, len=%d\n", req, req->skb, skb_size(req->skb));
@@ -349,44 +354,47 @@ void ccci_cmpt_mem_dump(int md_id, void *start_addr, int len)
 {
 	unsigned int *curr_p = (unsigned int *)start_addr;
 	unsigned char *curr_ch_p;
-	int _32_fix_num = len/32;
-	int tail_num = len%32;
-	char buf[32];
+	int _64_fix_num = len / 64;
+	int tail_num = len % 64;
+	char buf[64];
 	int i,j;
 
 	if(NULL == curr_p) {
-		printk(KERN_DEBUG "[CCCI%d-DUMP]NULL point to dump!\n", md_id+1);
+		CCCI_INF_MSG(md_id, BM, "NULL point to dump!\n");
 		return;
 	}
 	if(0 == len){
-		printk(KERN_DEBUG "[CCCI%d-DUMP]Not need to dump\n", md_id+1);
+		CCCI_INF_MSG(md_id, BM, "Not need to dump\n");
 		return;
 	}
 
-	printk(KERN_DEBUG "[CCCI%d-DUMP]Base: %p\n", md_id+1, start_addr);
-	// Fix section
-	for(i=0; i<_32_fix_num; i++){
-		printk(KERN_DEBUG "[CCCI%d-DUMP]%03X: %X %X %X %X %X %X %X %X\n", 
-				md_id+1, i*32, 
+	/* Fix section */
+	for (i = 0; i < _64_fix_num; i++) {
+		CCCI_INF_MSG(md_id, BM, "%03X: %X %X %X %X %X %X %X %X %X %X %X %X %X %X %X %X\n",
+		       i * 64,
 				*curr_p, *(curr_p+1), *(curr_p+2), *(curr_p+3),
-				*(curr_p+4), *(curr_p+5), *(curr_p+6), *(curr_p+7));
-		curr_p+=8;
+		       *(curr_p + 4), *(curr_p + 5), *(curr_p + 6), *(curr_p + 7),
+		       *(curr_p + 8), *(curr_p + 9), *(curr_p + 10), *(curr_p + 11),
+		       *(curr_p + 12), *(curr_p + 13), *(curr_p + 14), *(curr_p + 15));
+		curr_p += 64/4;
 	}
 
-	// Tail section
+	/* Tail section */
 	if(tail_num > 0){
 		curr_ch_p = (unsigned char*)curr_p;
 		for(j=0; j<tail_num; j++){
 			buf[j] = *curr_ch_p;
 			curr_ch_p++;
 		}
-		for(; j<32; j++)
+		for (; j < 64; j++)
 			buf[j] = 0;
 		curr_p = (unsigned int*)buf;
-		printk(KERN_DEBUG "[CCCI%d-DUMP]%03X: %X %X %X %X %X %X %X %X\n", 
-				md_id+1, i*32, 
+		CCCI_INF_MSG(md_id, BM, "%03X: %X %X %X %X %X %X %X %X %X %X %X %X %X %X %X %X\n",
+		       i * 64,
 				*curr_p, *(curr_p+1), *(curr_p+2), *(curr_p+3),
-				*(curr_p+4), *(curr_p+5), *(curr_p+6), *(curr_p+7));
+		       *(curr_p + 4), *(curr_p + 5), *(curr_p + 6), *(curr_p + 7),
+		       *(curr_p + 8), *(curr_p + 9), *(curr_p + 10), *(curr_p + 11),
+		       *(curr_p + 12), *(curr_p + 13), *(curr_p + 14), *(curr_p + 15));
 	}
 }
 EXPORT_SYMBOL(ccci_cmpt_mem_dump);

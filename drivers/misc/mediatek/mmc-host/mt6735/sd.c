@@ -3051,7 +3051,21 @@ static void msdc_restore_emmc_setting(struct msdc_host *host)
 	sdr_set_field(MSDC_PATCH_BIT2, MSDC_PB2_RESPWAITCNT, host->saved_para.resp_wait_cnt);
 }
 
+static void msdc_recovery_sd_tune_path(struct msdc_host *host)
+{
+	void __iomem *base = host->base;
 
+	if (host->hw->host_function == MSDC_SD) {
+		sdr_set_field(MSDC_PATCH_BIT2, 0x1 << 28, 0);
+		sdr_set_field(MSDC_PATCH_BIT2, 0x1 << 15, 1);
+#if defined(CONFIG_ARCH_MT6735) || defined(CONFIG_ARCH_MT6753)
+		sdr_write32(MSDC_PAD_TUNE0,   0x00000000);
+#else
+		sdr_write32(MSDC_PAD_TUNE0,   0x00008000);
+#endif
+	}
+
+}
 static void msdc_pm(pm_message_t state, void *data)
 {
     struct msdc_host *host = (struct msdc_host *)data;
@@ -3177,6 +3191,7 @@ static void msdc_pm(pm_message_t state, void *data)
 				}
 			}	
 #endif
+			msdc_recovery_sd_tune_path(host);
 			(void)mmc_resume_host(host->mmc);
 			if((host->hw->host_function == MSDC_EMMC) && emmc_sleep_failed)
 				emmc_sleep_failed=0; 
@@ -3918,10 +3933,12 @@ static unsigned int msdc_command_resp_polling(struct msdc_host   *host,
 				*rsp = sdr_read32(SDC_RESP0);
 				/* workaround for latch error */
 				if (((cmd->opcode == 13) || (cmd->opcode == 25)) && (*rsp & R1_OUT_OF_RANGE) 
-					&& (host->hw->host_function != MSDC_SDIO)) {
+					&& (host->hw->host_function == MSDC_EMMC)) {
 					pr_err("[%s]: msdc%d XXX CMD<%d> resp<0x%.8x>,bit31=1,force make crc error\n",
 						__func__, host->id, cmd->opcode, *rsp);
 					cmd->error = (unsigned int)-EIO;
+					if (cmd->opcode == 25)
+						msdc_reset_hw(host->id);
 				}
 				break;
 			}

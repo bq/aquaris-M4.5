@@ -2425,7 +2425,11 @@ p2pFsmRunEventDeauthTxDone (
 
         prP2pBssInfo = &(prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_P2P_INDEX]);
         eOriMediaStatus = prP2pBssInfo->eConnectionState;
-
+		/* Change station state. */
+		cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
+		
+		/* Reset Station Record Status. */
+		p2pFuncResetStaRecStatus(prAdapter, prStaRec);
 
 		bssRemoveStaRecFromClientList(prAdapter, prP2pBssInfo, prStaRec);
 
@@ -2727,29 +2731,17 @@ p2pFsmRunEventRxDeauthentication (
     IN P_SW_RFB_T prSwRfb
     )
 {
-
 	P_P2P_FSM_INFO_T prP2pFsmInfo = (P_P2P_FSM_INFO_T)NULL;		
     P_BSS_INFO_T prP2pBssInfo = (P_BSS_INFO_T)NULL;
-    UINT_16 u2ReasonCode = 0;
 
     do {
-        ASSERT_BREAK((prAdapter != NULL) && (prSwRfb != NULL));
-
-        if (prStaRec == NULL) {
-            prStaRec = cnmGetStaRecByIndex(prAdapter, prSwRfb->ucStaRecIdx);
-        }
+        ASSERT_BREAK((prAdapter != NULL) && (prStaRec != NULL) && (prSwRfb != NULL));
 		prP2pFsmInfo = prAdapter->rWifiVar.prP2pFsmInfo;
-		
-		if (prP2pFsmInfo == NULL) {
+        prP2pBssInfo = &prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_P2P_INDEX];
+
+		if ((prP2pFsmInfo == NULL) || (prP2pBssInfo == NULL)) {
 		   break;
 		}
-
-        if (!prStaRec) {
-            break;
-        }
-
-
-        prP2pBssInfo = &prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_P2P_INDEX];
 
         if (prStaRec->ucStaState == STA_STATE_1) {
             break;
@@ -2761,30 +2753,29 @@ p2pFsmRunEventRxDeauthentication (
         case OP_MODE_INFRASTRUCTURE:
             if (authProcessRxDeauthFrame(prSwRfb,
                     prStaRec->aucMacAddr,
-                    &u2ReasonCode) == WLAN_STATUS_SUCCESS) {
+                    &prStaRec->u2ReasonCode) == WLAN_STATUS_SUCCESS) {
                 P_WLAN_DEAUTH_FRAME_T prDeauthFrame = (P_WLAN_DEAUTH_FRAME_T)prSwRfb->pvHeader;
                 UINT_16 u2IELength = 0;
 
+                DBGLOG(P2P, INFO, ("Deauth reason: %d\n", prStaRec->u2ReasonCode));
+
                 if (prP2pBssInfo->prStaRecOfAP != prStaRec) {
+                    DBGLOG(P2P, ERROR, ("Deauth frame is not from GO\n"));
                     break;
                 }
 
-
-                prStaRec->u2ReasonCode = u2ReasonCode;
                 u2IELength = prSwRfb->u2PacketLen - (WLAN_MAC_HEADER_LEN + REASON_CODE_FIELD_LEN);
-
-                ASSERT(prP2pBssInfo->prStaRecOfAP == prStaRec);
 
                 /* Indicate disconnect to Host. */
                 kalP2PGCIndicateConnectionStatus(prAdapter->prGlueInfo,
                                         NULL,
                                         prDeauthFrame->aucInfoElem,
                                         u2IELength,
-                                        u2ReasonCode);
+                                        prStaRec->u2ReasonCode);
 
                 prP2pBssInfo->prStaRecOfAP = NULL;
 
-                p2pFuncDisconnect(prAdapter, prStaRec, FALSE, u2ReasonCode);
+                p2pFuncDisconnect(prAdapter, prStaRec, FALSE, prStaRec->u2ReasonCode);
 				p2pChangeMediaState(prAdapter, PARAM_MEDIA_STATE_DISCONNECTED);
 
                 SET_NET_PWR_STATE_IDLE(prAdapter, NETWORK_TYPE_P2P_INDEX);
@@ -2796,10 +2787,12 @@ p2pFsmRunEventRxDeauthentication (
             /* Delete client from client list. */
             if (authProcessRxDeauthFrame(prSwRfb,
                     prP2pBssInfo->aucBSSID,
-                    &u2ReasonCode) == WLAN_STATUS_SUCCESS) {
+                    &prStaRec->u2ReasonCode) == WLAN_STATUS_SUCCESS) {
                 P_LINK_T prStaRecOfClientList = (P_LINK_T)NULL;
                 P_LINK_ENTRY_T prLinkEntry = (P_LINK_ENTRY_T)NULL;
                 P_STA_RECORD_T prCurrStaRec = (P_STA_RECORD_T)NULL;
+
+                DBGLOG(P2P, INFO, ("Deauth reason: %d\n", prStaRec->u2ReasonCode));
 
                 prStaRecOfClientList = &prP2pBssInfo->rStaRecOfClientList;
 
@@ -2817,7 +2810,7 @@ p2pFsmRunEventRxDeauthentication (
                         //kalP2PGOStationUpdate(prAdapter->prGlueInfo, prStaRec, FALSE);
 
                         /* Indicate disconnect to Host. */
-                        p2pFuncDisconnect(prAdapter, prStaRec, FALSE, u2ReasonCode);
+                        p2pFuncDisconnect(prAdapter, prStaRec, FALSE, prStaRec->u2ReasonCode);
 
                         break;
                     }
@@ -2830,8 +2823,6 @@ p2pFsmRunEventRxDeauthentication (
             ASSERT(FALSE);
             break;
         }
-
-        DBGLOG(P2P, TRACE, ("Deauth Reason:%d\n", u2ReasonCode));
 
     } while (FALSE);
 
@@ -2858,25 +2849,17 @@ p2pFsmRunEventRxDisassociation (
 {
     P_BSS_INFO_T prP2pBssInfo = (P_BSS_INFO_T)NULL;
 	P_P2P_FSM_INFO_T prP2pFsmInfo = (P_P2P_FSM_INFO_T)NULL;
-    UINT_16 u2ReasonCode = 0;
 
     do {
-        ASSERT_BREAK((prAdapter != NULL) && (prSwRfb != NULL));
+        ASSERT_BREAK((prAdapter != NULL) && (prStaRec != NULL) && (prSwRfb != NULL));
 		prP2pFsmInfo = prAdapter->rWifiVar.prP2pFsmInfo;
-		
-		if (prP2pFsmInfo == NULL) {
+		prP2pBssInfo = &(prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_P2P_INDEX]);
+
+		if ((prP2pFsmInfo == NULL) || (prP2pBssInfo == NULL)) {
 			 break;
-		}
-
-        if (prStaRec == NULL) {
-            prStaRec = cnmGetStaRecByIndex(prAdapter, prSwRfb->ucStaRecIdx);
-        }
-
-
-        prP2pBssInfo = &(prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_P2P_INDEX]);
+		}        
 
         if (prStaRec->ucStaState == STA_STATE_1) {
-
             break;
         }
 
@@ -2891,12 +2874,12 @@ p2pFsmRunEventRxDisassociation (
                 P_WLAN_DISASSOC_FRAME_T prDisassocFrame = (P_WLAN_DISASSOC_FRAME_T)prSwRfb->pvHeader;
                 UINT_16 u2IELength = 0;
 
-                ASSERT(prP2pBssInfo->prStaRecOfAP == prStaRec);
+                DBGLOG(P2P, INFO, ("Disassoc reason: %d\n", prStaRec->u2ReasonCode));
 
                 if (prP2pBssInfo->prStaRecOfAP != prStaRec) {
+                    DBGLOG(P2P, ERROR, ("Disassoc frame is not from GO\n"));
                     break;
                 }
-
 
                 u2IELength = prSwRfb->u2PacketLen - (WLAN_MAC_HEADER_LEN + REASON_CODE_FIELD_LEN);
 
@@ -2921,10 +2904,12 @@ p2pFsmRunEventRxDisassociation (
             if (assocProcessRxDisassocFrame(prAdapter,
                     prSwRfb,
                     prP2pBssInfo->aucBSSID,
-                    &u2ReasonCode) == WLAN_STATUS_SUCCESS) {
+                    &prStaRec->u2ReasonCode) == WLAN_STATUS_SUCCESS) {
                 P_LINK_T prStaRecOfClientList = (P_LINK_T)NULL;
                 P_LINK_ENTRY_T prLinkEntry = (P_LINK_ENTRY_T)NULL;
                 P_STA_RECORD_T prCurrStaRec = (P_STA_RECORD_T)NULL;
+
+                DBGLOG(P2P, INFO, ("Disassoc reason: %d\n", prStaRec->u2ReasonCode));
 
                 prStaRecOfClientList = &prP2pBssInfo->rStaRecOfClientList;
 
@@ -2942,7 +2927,7 @@ p2pFsmRunEventRxDisassociation (
                         //kalP2PGOStationUpdate(prAdapter->prGlueInfo, prStaRec, FALSE);
 
                         /* Indicate disconnect to Host. */
-                        p2pFuncDisconnect(prAdapter, prStaRec, FALSE, u2ReasonCode);
+                        p2pFuncDisconnect(prAdapter, prStaRec, FALSE, prStaRec->u2ReasonCode);
 
                         break;
                     }
@@ -2954,7 +2939,6 @@ p2pFsmRunEventRxDisassociation (
             ASSERT(FALSE);
             break;
         }
-
 
     } while (FALSE);
 

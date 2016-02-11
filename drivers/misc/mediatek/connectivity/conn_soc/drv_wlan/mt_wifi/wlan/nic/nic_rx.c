@@ -1500,8 +1500,11 @@ nicRxProcessDataPacket (
     P_HIF_RX_HEADER_T prHifRxHdr;
     P_STA_RECORD_T prStaRec;
 	BOOLEAN		fIsDummy=FALSE;
+	UINT_16 u2Etype = 0;
+	BOOLEAN fgIsSkipClass3Chk = FALSE;
+
     DEBUGFUNC("nicRxProcessDataPacket");
-    //DBGLOG(INIT, TRACE, ("\n"));
+    //DBGLOG(RX, TRACE, ("\n"));
 
     ASSERT(prAdapter);
     ASSERT(prSwRfb);
@@ -1516,10 +1519,8 @@ nicRxProcessDataPacket (
 #if 1 /* Check 1x Pkt */
     if (prSwRfb->u2PacketLen > 14) {
         PUINT_8 pc = (PUINT_8)prSwRfb->pvHeader;
-        UINT_16 u2Etype = 0;
 
         u2Etype = (pc[ETH_TYPE_LEN_OFFSET] << 8) | (pc[ETH_TYPE_LEN_OFFSET + 1]);
-
 #if CFG_SUPPORT_WAPI
         if (u2Etype == ETH_P_1X || u2Etype == ETH_WPI_1X) {
             DBGLOG(RSN, INFO, ("R1X len=%d\n", prSwRfb->u2PacketLen));
@@ -1547,8 +1548,23 @@ nicRxProcessDataPacket (
 #endif /* CFG_TCP_IP_CHKSUM_OFFLOAD */
 
     prStaRec = cnmGetStaRecByIndex(prAdapter, prHifRxHdr->ucStaRecIdx);
-    if(secCheckClassError(prAdapter, prSwRfb, prStaRec) == TRUE &&
-    	 prAdapter->fgTestMode == FALSE) {
+
+	if ((u2Etype == ETH_P_1X) || (u2Etype == ETH_P_PRE_1X)) 
+	{
+		if ((prStaRec != NULL) && 
+				(prStaRec->eAuthAssocState == SAA_STATE_WAIT_ASSOC2)) 
+		{ 
+			/* skip to check class 3 error */ 
+			fgIsSkipClass3Chk = TRUE; 
+		} 
+	} 
+	
+	if((fgIsSkipClass3Chk == TRUE) || 
+			(secCheckClassError(prAdapter, prSwRfb, prStaRec) == TRUE && 
+			 prAdapter->fgTestMode == FALSE)) { 
+	
+	//	  if(secCheckClassError(prAdapter, prSwRfb, prStaRec) == TRUE &&
+	//		 prAdapter->fgTestMode == FALSE) {
 #if CFG_HIF_RX_STARVATION_WARNING
         prRxCtrl->u4QueuedCnt++;
 #endif
@@ -1565,6 +1581,10 @@ nicRxProcessDataPacket (
 					} else {
                 switch(prRetSwRfb->eDst) {
                 case RX_PKT_DESTINATION_HOST:
+#if ARP_MONITER_ENABLE
+					if (prStaRec && IS_STA_IN_AIS(prStaRec))
+						qmHandleRxArpPackets(prAdapter, prRetSwRfb);
+#endif
                     nicRxProcessPktWithoutReorder(prAdapter, prRetSwRfb);
                     break;
 
@@ -1629,7 +1649,7 @@ nicRxProcessGSCNEvent (
 
 
     DEBUGFUNC("nicRxProcessGSCNEvent");
-    //DBGLOG(INIT, TRACE, ("\n"));
+    //DBGLOG(RX, TRACE, ("\n"));
 
     DBGLOG(SCN, INFO, ("nicRxProcessGSCNEvent  \n"));
 
@@ -1715,7 +1735,7 @@ nicRxProcessGSCNEvent (
 
             skb = cfg80211_vendor_cmd_alloc_reply_skb(wiphy, sizeof(PARAM_WIFI_GSCAN_RESULT) * real_num);
             if(!skb) {
-                DBGLOG(INIT, TRACE, ("%s allocate skb failed:%x\n", __FUNCTION__, i4Status));
+                DBGLOG(RX, TRACE, ("%s allocate skb failed:%x\n", __FUNCTION__, i4Status));
                 return -ENOMEM;
             }
 
@@ -1906,7 +1926,7 @@ nicRxProcessEventPacket (
 
 
     DEBUGFUNC("nicRxProcessEventPacket");
-    //DBGLOG(INIT, TRACE, ("\n"));
+    //DBGLOG(RX, TRACE, ("\n"));
 
     ASSERT(prAdapter);
     ASSERT(prSwRfb);
@@ -1914,7 +1934,7 @@ nicRxProcessEventPacket (
     prEvent = (P_WIFI_EVENT_T) prSwRfb->pucRecvBuff;
     prGlueInfo = prAdapter->prGlueInfo;
 
-	DBGLOG(INIT, TRACE, ("prEvent->ucEID = %d\n", prEvent->ucEID));
+	DBGLOG(RX, TRACE, ("prEvent->ucEID = %d\n", prEvent->ucEID));
     // Event Handling
     switch(prEvent->ucEID) {
 		case EVENT_ID_WARNING_TO_DRIVER:
@@ -2234,14 +2254,14 @@ nicRxProcessEventPacket (
             P_EVENT_TX_DONE_T prTxDone;
             prTxDone = (P_EVENT_TX_DONE_T)(prEvent->aucBuffer);
 
-            DBGLOG(INIT, TRACE,("EVENT_ID_TX_DONE PacketSeq:%u ucStatus: %u SN: %u\n",
+            DBGLOG(RX, TRACE,("EVENT_ID_TX_DONE PacketSeq:%u ucStatus: %u SN: %u\n",
                 prTxDone->ucPacketSeq, prTxDone->ucStatus, prTxDone->u2SequenceNumber));
 
             /* call related TX Done Handler */
             prMsduInfo = nicGetPendingTxMsduInfo(prAdapter, prTxDone->ucPacketSeq);
 
 #if CFG_SUPPORT_802_11V_TIMING_MEASUREMENT
-            DBGLOG(INIT, TRACE, ("EVENT_ID_TX_DONE u4TimeStamp = %x u2AirDelay = %x\n", 
+            DBGLOG(RX, TRACE, ("EVENT_ID_TX_DONE u4TimeStamp = %x u2AirDelay = %x\n", 
                 prTxDone->au4Reserved1, prTxDone->au4Reserved2));
             
             wnmReportTimingMeas(prAdapter, prMsduInfo->ucStaRecIndex, 
@@ -2349,13 +2369,13 @@ nicRxProcessEventPacket (
         break;
 #endif
     case EVENT_ID_BSS_BEACON_TIMEOUT:
-        DBGLOG(INIT, INFO,("EVENT_ID_BSS_BEACON_TIMEOUT\n"));
+        DBGLOG(RX, INFO,("EVENT_ID_BSS_BEACON_TIMEOUT\n"));
 
         if (prAdapter->fgDisBcnLostDetection == FALSE) {
             P_EVENT_BSS_BEACON_TIMEOUT_T prEventBssBeaconTimeout;
             prEventBssBeaconTimeout = (P_EVENT_BSS_BEACON_TIMEOUT_T)(prEvent->aucBuffer);
 
-			DBGLOG(INIT, INFO,("Reason = %u\n", prEventBssBeaconTimeout->ucReason));
+			DBGLOG(RX, INFO,("Reason = %u\n", prEventBssBeaconTimeout->ucReason));
 
             if(prEventBssBeaconTimeout->ucNetTypeIndex == NETWORK_TYPE_AIS_INDEX) {
                 /* Request stats report before beacon timeout */
@@ -2422,7 +2442,7 @@ nicRxProcessEventPacket (
                     break;
                 }
 
-                DBGLOG(INIT, INFO,("EVENT_ID_STA_AGING_TIMEOUT %u " MACSTR "\n",
+                DBGLOG(RX, INFO,("EVENT_ID_STA_AGING_TIMEOUT %u " MACSTR "\n",
                                 prEventStaAgingTimeout->ucStaRecIdx, MAC2STR(prStaRec->aucMacAddr)));
 
                 prBssInfo = &(prAdapter->rWifiVar.arBssInfo[prStaRec->ucNetTypeIndex]);
@@ -2732,7 +2752,7 @@ nicRxProcessMgmtPacket (
 
     ucSubtype = (*(PUINT_8)(prSwRfb->pvHeader) & MASK_FC_SUBTYPE )>> OFFSET_OF_FC_SUBTYPE;
 
-#if 1 //CFG_RX_PKTS_DUMP
+#if 0 //CFG_RX_PKTS_DUMP
     {
         P_HIF_RX_HEADER_T   prHifRxHdr;
         UINT_16 u2TxFrameCtrl;
@@ -2743,7 +2763,7 @@ nicRxProcessMgmtPacket (
         //    if (u2TxFrameCtrl == MAC_FRAME_BEACON ||
         //    	  u2TxFrameCtrl == MAC_FRAME_PROBE_RSP) {
 
-                DBGLOG(INIT, INFO, ("QM RX MGT: net %u sta idx %u wlan idx %u ssn %u ptype %u subtype %u 11 %u\n",
+                DBGLOG(RX, INFO, ("QM RX MGT: net %u sta idx %u wlan idx %u ssn %u ptype %u subtype %u 11 %u\n",
                     (UINT_32)HIF_RX_HDR_GET_NETWORK_IDX(prHifRxHdr),
                     prHifRxHdr->ucStaRecIdx,
                     prSwRfb->ucWlanIdx,
@@ -2863,6 +2883,44 @@ nicRxProcessRFBs (
                     nicRxReturnRFB(prAdapter, prSwRfb); /* need to free it */
                     break;
             }
+			
+		do {
+			P_WIFI_EVENT_T prEvent;
+			PUINT_8 pvHeader = (PUINT_8)(prSwRfb->pvHeader);
+			UINT_8 ucSubtype;
+			UINT_16 u2Temp = 0;
+			P_HIF_RX_HEADER_T prHifRxHdr = prSwRfb->prHifRxHdr;
+				
+			if (!kalIsWakeupByWlan(prAdapter))
+				break;
+
+			switch (prSwRfb->ucPacketType) {
+			case HIF_RX_PKT_TYPE_DATA:
+				u2Temp = (pvHeader[ETH_TYPE_LEN_OFFSET] << 8) |
+									(pvHeader[ETH_TYPE_LEN_OFFSET + 1]);
+					
+				if (u2Temp == ETH_P_IP) {
+					u2Temp = *(UINT_16 *) &pvHeader[ETH_HLEN + 4];
+					DBGLOG(INIT, INFO, ("IP Packet from:%d.%d.%d.%d, IP ID 0x%04x wakeup host\n",
+							pvHeader[ETH_HLEN + 12], pvHeader[ETH_HLEN + 13],
+							pvHeader[ETH_HLEN + 14], pvHeader[ETH_HLEN + 15], u2Temp));
+				} else
+					DBGLOG(INIT, INFO, ("Data Packet, EthType 0x%04x wakeup host\n", u2Temp));
+				break;
+			case HIF_RX_PKT_TYPE_EVENT:
+				prEvent = (P_WIFI_EVENT_T) prSwRfb->pucRecvBuff;
+				DBGLOG(INIT, INFO, ("Event 0x%02x wakeup host\n", prEvent->ucEID));
+				break;
+			case HIF_RX_PKT_TYPE_MANAGEMENT:
+				ucSubtype = (*pvHeader & MASK_FC_SUBTYPE ) >> OFFSET_OF_FC_SUBTYPE;
+				DBGLOG(INIT, INFO, ("MGMT frame subtype: %d Seq %u wakeup host\n",
+					ucSubtype, (UINT_32)HIF_RX_HDR_GET_SN(prHifRxHdr)));
+				break;
+			default:
+				DBGLOG(INIT, INFO, ("Unknow Packet %d wakeup host\n", prSwRfb->ucPacketType));
+				break;
+			}
+		} while (FALSE);
         }
         else {
             break;
@@ -3811,12 +3869,12 @@ nicRxWaitResponse (
             u4Current = kalGetTimeTick();
 
             if((u4Current > u4Time) && ((u4Current - u4Time) > RX_RESPONSE_TIMEOUT)) {
-				DBGLOG(INIT, ERROR,("RX_RESPONSE_TIMEOUT1 %u %d %u\n", u4PktLen, i,
+				DBGLOG(RX, ERROR,("RX_RESPONSE_TIMEOUT1 %u %d %u\n", u4PktLen, i,
 					u4Current));
                 return WLAN_STATUS_FAILURE;
             }
             else if(u4Current < u4Time && ((u4Current + (0xFFFFFFFF - u4Time)) > RX_RESPONSE_TIMEOUT)) {
-				DBGLOG(INIT, ERROR,("RX_RESPONSE_TIMEOUT2 %u %d %u\n", u4PktLen, i, u4Current));
+				DBGLOG(RX, ERROR,("RX_RESPONSE_TIMEOUT2 %u %d %u\n", u4PktLen, i, u4Current));
                 return WLAN_STATUS_FAILURE;
             }
 
@@ -3830,9 +3888,9 @@ nicRxWaitResponse (
                     TO: buffer is not enough but we still need to read all data from HIF to avoid
                     HIF crazy.
                 */
-            DBGLOG(INIT, ERROR, ("Not enough Event Buffer: required length = 0x%x, available buffer length = %d\n",
+            DBGLOG(RX, ERROR, ("Not enough Event Buffer: required length = 0x%x, available buffer length = %d\n",
                 u4PktLen, u4MaxRespBufferLen));
-			DBGLOG(INIT, ERROR, ("i = %d, u4PktLen = %u\n", i, u4PktLen));
+			DBGLOG(RX, ERROR, ("i = %d, u4PktLen = %u\n", i, u4PktLen));
             return WLAN_STATUS_FAILURE;
         }
         else {
@@ -3844,7 +3902,7 @@ nicRxWaitResponse (
 
             /* fgResult will be updated in MACRO */
             if (!fgResult) {
-                DBGLOG(INIT, ERROR, ("Read Response Packet Error\n"));
+                DBGLOG(RX, ERROR, ("Read Response Packet Error\n"));
                 return WLAN_STATUS_FAILURE;
             }
 
@@ -3960,7 +4018,7 @@ nicRxProcessActionFrame (
         return WLAN_STATUS_INVALID_PACKET;
     }
     prActFrame = (P_WLAN_ACTION_FRAME) prSwRfb->pvHeader;
-    DBGLOG(INIT, INFO,("Category %u\n", prActFrame->ucCategory));
+    DBGLOG(RX, INFO,("Category %u\n", prActFrame->ucCategory));
 
     switch (prActFrame->ucCategory) {
     case CATEGORY_PUBLIC_ACTION:

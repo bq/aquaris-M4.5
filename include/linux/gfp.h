@@ -289,6 +289,11 @@ static inline int allocflags_to_migratetype(gfp_t gfp_flags)
 	| 1 << (___GFP_MOVABLE | ___GFP_DMA32 | ___GFP_DMA | ___GFP_HIGHMEM)  \
 )
 
+#if defined(CONFIG_CMA) && defined(CONFIG_MTK_SVP)
+extern void adjust_forbid_cma_alloc_flag(int flag);
+extern int get_forbid_cma_alloc_flag(void);
+#endif
+
 static inline enum zone_type gfp_zone(gfp_t flags)
 {
 	enum zone_type z;
@@ -299,7 +304,7 @@ static inline enum zone_type gfp_zone(gfp_t flags)
 	VM_BUG_ON((GFP_ZONE_BAD >> bit) & 1);
 
 #if defined(CONFIG_CMA) && defined(CONFIG_MTK_SVP)
-	if ((flags & __GFP_NOZONECMA) && is_zone_cma_idx(z))
+	if (is_zone_cma_idx(z) && ((flags & __GFP_NOZONECMA) || get_forbid_cma_alloc_flag()))
 		z = ZONE_MOVABLE;
 #endif
 
@@ -451,9 +456,7 @@ static inline bool pm_suspended_storage(void)
 #ifdef CONFIG_CMA
 
 #if defined(CONFIG_CMA) && defined(CONFIG_MTK_SVP)
-extern void adjust_forbid_cma_alloc_flag(int flag);
-extern int get_forbid_cma_alloc_flag(void);
-
+/* The below functions must be run on a range from a single zone. */
 extern int alloc_contig_range(unsigned long start, unsigned long end,
 			      unsigned migratetype, unsigned newpagemovable);
 #else

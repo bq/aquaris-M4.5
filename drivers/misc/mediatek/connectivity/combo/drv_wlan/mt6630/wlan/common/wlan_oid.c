@@ -5461,8 +5461,7 @@ wlanoidQueryLinkSpeed(IN P_ADAPTER_T prAdapter,
 	}
 
 	if (kalGetMediaStateIndicated(prAdapter->prGlueInfo) != PARAM_MEDIA_STATE_CONNECTED) {
-		*(PUINT_32) pvQueryBuffer = 10000;	/* change to unit of 100bps */
-		return WLAN_STATUS_SUCCESS;
+        WLAN_STATUS_ADAPTER_NOT_READY;
 	} else if (prAdapter->fgIsLinkRateValid == TRUE &&
 		   (kalGetTimeTick() - prAdapter->rLinkRateUpdateTime) <=
 		   CFG_LINK_QUALITY_VALID_PERIOD) {

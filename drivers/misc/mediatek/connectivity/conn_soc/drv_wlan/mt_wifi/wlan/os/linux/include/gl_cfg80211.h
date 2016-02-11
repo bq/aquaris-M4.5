@@ -518,7 +518,7 @@ mtk_p2p_cfg80211_testmode_sw_cmd(
     #error "Please ENABLE kernel config (CONFIG_NL80211_TESTMODE) to support Wi-Fi Direct"
 #endif
 
-
+int	mtk_cfg80211_suspend(struct wiphy *wiphy, struct cfg80211_wowlan *wow);
 /*******************************************************************************
 *                              F U N C T I O N S
 ********************************************************************************

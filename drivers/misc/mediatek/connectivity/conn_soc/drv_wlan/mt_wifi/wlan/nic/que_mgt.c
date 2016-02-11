@@ -483,8 +483,10 @@ OS_SYSTIME g_arMissTimeout[CFG_STA_REC_NUM][CFG_RX_MAX_BA_TID_NUM];
 *                           P R I V A T E   D A T A
 ********************************************************************************
 */
-
-
+#if ARP_MONITER_ENABLE
+static UINT_16 arpMoniter;
+static UINT_8 apIp[4];
+#endif
 /*******************************************************************************
 *                                 M A C R O S
 ********************************************************************************
@@ -1430,7 +1432,10 @@ qmEnqueueTxPackets(
 						prQM->u4TimeToAdjustTcResource = 1;
 					}
 #endif
-
+#if ARP_MONITER_ENABLE
+					if (IS_STA_IN_AIS(prStaRec) && prCurrentMsduInfo->eSrc == TX_PACKET_OS)
+						qmDetectArpNoResponse(prAdapter, prCurrentMsduInfo);
+#endif
                     break; /*default */
              } /* switch (prCurrentMsduInfo->ucStaRecIndex) */
 
@@ -2942,12 +2947,11 @@ qmHandleRxPackets(
                     if(OP_MODE_ACCESS_POINT == prBssInfo->eCurrentOPMode) {
                         if (IS_BMCAST_MAC_ADDR(pucEthDestAddr)){
                             prCurrSwRfb->eDst = RX_PKT_DESTINATION_HOST_WITH_FORWARD;
-                        }
-                        else if(UNEQUAL_MAC_ADDR(prBssInfo->aucOwnMacAddr,pucEthDestAddr)) {
-                            prCurrSwRfb->eDst = RX_PKT_DESTINATION_FORWARD;
-                            /* TODO : need to check the dst mac is valid */
-                            /* If src mac is invalid, the packet will be freed in fw */
-                        }
+                        } else if (UNEQUAL_MAC_ADDR(prBssInfo->aucOwnMacAddr, pucEthDestAddr) &&
+							bssGetClientByAddress(prBssInfo, pucEthDestAddr)) {
+							/* if dest addr is for station in my bss, forward to him */
+							prCurrSwRfb->eDst = RX_PKT_DESTINATION_FORWARD;
+						}
                     } /* OP_MODE_ACCESS_POINT */
 #if CFG_SUPPORT_HOTSPOT_2_0
 					else if(hs20IsFrameFilterEnabled(prAdapter, prBssInfo) &&
@@ -2976,7 +2980,21 @@ qmHandleRxPackets(
             }
 
         }
-
+#if CFG_SUPPORT_WAPI
+		if (prCurrSwRfb->u2PacketLen > ETHER_HEADER_LEN) {
+			PUINT_8 pc = (PUINT_8) prCurrSwRfb->pvHeader;
+			UINT_16 u2Etype = 0;
+			u2Etype = (pc[ETH_TYPE_LEN_OFFSET] << 8) | (pc[ETH_TYPE_LEN_OFFSET + 1]);
+			/* for wapi integrity test. WPI_1x packet should be always in non-encrypted mode.
+				if we received any WPI(0x88b4) packet that is encrypted, drop here. */
+			if (u2Etype == ETH_WPI_1X && HIF_RX_HDR_GET_SEC_MODE(prHifRxHdr) != 0) {
+				DBGLOG(RX, INFO, ("drop wpi packet with sec mode\n"));
+				prCurrSwRfb->eDst = RX_PKT_DESTINATION_NULL;
+				QUEUE_INSERT_TAIL(&rReturnedQue, (P_QUE_ENTRY_T) prCurrSwRfb);
+				continue;
+			}
+		}
+#endif
         /* BAR frame */
         if(HIF_RX_HDR_GET_BAR_FLAG(prHifRxHdr)){
             prCurrSwRfb->eDst = RX_PKT_DESTINATION_NULL;
@@ -4110,6 +4128,9 @@ mqmProcessAssocRsp (
         /* Parse AC parameters and write to HW CRs */
         if((prStaRec->fgIsQoS) && (prStaRec->eStaType == STA_TYPE_LEGACY_AP)){
             mqmParseEdcaParameters(prAdapter, prSwRfb, pucIEStart, u2IELength, TRUE);
+#if ARP_MONITER_ENABLE
+			qmResetArpDetect();
+#endif
         }
 
         DBGLOG(QM, TRACE, ("MQM: Assoc_Rsp Parsing (QoS Enabled=%d)\n", prStaRec->fgIsQoS));
@@ -5388,4 +5409,77 @@ qmGetRxReorderQueuedBufferCount(
    return u4Total;
 }
 
+#if ARP_MONITER_ENABLE
+VOID qmDetectArpNoResponse(P_ADAPTER_T prAdapter, P_MSDU_INFO_T prMsduInfo)
+{
+	struct sk_buff *prSkb = NULL;
+	PUINT_8 pucData = NULL;
+	UINT_16 u2EtherType = 0;
+	int arpOpCode = 0;
 
+	prSkb = (struct sk_buff *)prMsduInfo->prPacket;
+
+	if (!prSkb || (prSkb->len <= ETHER_HEADER_LEN))
+		return;
+
+	pucData = prSkb->data;
+	if (!pucData)
+		return;
+	u2EtherType = (pucData[ETH_TYPE_LEN_OFFSET] << 8) | (pucData[ETH_TYPE_LEN_OFFSET + 1]);
+
+	if (u2EtherType != ETH_P_ARP || (apIp[0] | apIp[1] | apIp[2] | apIp[3]) == 0)
+		return;
+
+	if (strncmp(apIp, &pucData[ETH_TYPE_LEN_OFFSET + 26], sizeof(apIp))) /* dest ip address */
+		return;
+
+	arpOpCode = (pucData[ETH_TYPE_LEN_OFFSET + 8] << 8) | (pucData[ETH_TYPE_LEN_OFFSET + 8 + 1]);
+	if (arpOpCode == ARP_PRO_REQ) {
+		arpMoniter++;
+		if (arpMoniter > 20) {
+			DBGLOG(INIT, WARN, ("IOT Critical issue, arp no resp, check AP!\n"));
+			aisBssBeaconTimeout(prAdapter);
+			arpMoniter = 0;
+			kalMemZero(apIp, sizeof(apIp));
+		}
+	}
+}
+
+VOID qmHandleRxArpPackets(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb)
+{
+	PUINT_8 pucData = NULL;
+	UINT_16 u2EtherType = 0;
+	int arpOpCode = 0;
+	P_BSS_INFO_T prBssInfo = NULL;
+
+	if (prSwRfb->u2PacketLen <= ETHER_HEADER_LEN)
+		return;
+
+	pucData = (PUINT_8)prSwRfb->pvHeader;
+	if (!pucData)
+		return;
+	u2EtherType = (pucData[ETH_TYPE_LEN_OFFSET] << 8) | (pucData[ETH_TYPE_LEN_OFFSET + 1]);
+
+	if (u2EtherType != ETH_P_ARP)
+		return;
+	arpOpCode = (pucData[ETH_TYPE_LEN_OFFSET + 8] << 8) | (pucData[ETH_TYPE_LEN_OFFSET + 8 + 1]);
+	prBssInfo = &(prAdapter->rWifiVar.arBssInfo[NETWORK_TYPE_AIS_INDEX]);
+	if (arpOpCode == ARP_PRO_RSP) {
+		arpMoniter = 0;
+		if (prBssInfo && prBssInfo->prStaRecOfAP && prBssInfo->prStaRecOfAP->aucMacAddr) {
+			if (EQUAL_MAC_ADDR(&(pucData[ETH_TYPE_LEN_OFFSET + 10]), /* source hardware address */
+					prBssInfo->prStaRecOfAP->aucMacAddr)) {
+				strncpy(apIp, &(pucData[ETH_TYPE_LEN_OFFSET + 16]), sizeof(apIp)); /* src ip address */
+				DBGLOG(INIT, TRACE, ("get arp response from AP %d.%d.%d.%d\n",
+					apIp[0], apIp[1], apIp[2], apIp[3]));
+			}
+		}
+	}
+}
+
+VOID qmResetArpDetect(VOID)
+{
+	arpMoniter = 0;
+	kalMemZero(apIp, sizeof(apIp));
+}
+#endif

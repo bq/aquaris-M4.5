@@ -781,26 +781,39 @@ cnmBss40mBwPermitted (
     ENUM_NETWORK_TYPE_INDEX_T   eNetTypeIdx
     )
 {
-    P_BSS_INFO_T    prBssInfo;
-    UINT_8          i;
+	P_BSS_INFO_T	prBssInfo;
+	UINT_8			i;
+	P_BSS_DESC_T	prBssDesc = NULL;
 
-    /* Note: To support real-time decision instead of current activated-time,
-     *       the STA roaming case shall be considered about synchronization
-     *       problem. Another variable fgAssoc40mBwAllowed is added to
-     *       represent HT capability when association
-     */
-    for (i = 0; i < NETWORK_TYPE_INDEX_NUM; i++) {
-        if (i != (UINT_8) eNetTypeIdx) {
-            prBssInfo = &prAdapter->rWifiVar.arBssInfo[i];
+	/* Note: To support real-time decision instead of current activated-time,
+	 *		 the STA roaming case shall be considered about synchronization
+	 *		 problem. Another variable fgAssoc40mBwAllowed is added to
+	 *		 represent HT capability when association
+	 */
+	for (i = 0; i < NETWORK_TYPE_INDEX_NUM; i++) {
+		if (i != (UINT_8) eNetTypeIdx) {
+			prBssInfo = &prAdapter->rWifiVar.arBssInfo[i];
 
-            if (IS_BSS_ACTIVE(prBssInfo) && (prBssInfo->fg40mBwAllowed ||
-                prBssInfo->fgAssoc40mBwAllowed)) {
-                return FALSE;
-            }
-        }
-    }
+			if (IS_BSS_ACTIVE(prBssInfo) && (prBssInfo->fg40mBwAllowed ||
+				prBssInfo->fgAssoc40mBwAllowed)) {
+				return FALSE;
+			}
+		}
+	}
 
-    return TRUE;
+	if (eNetTypeIdx == NETWORK_TYPE_AIS_INDEX)
+		prBssDesc = prAdapter->rWifiVar.rAisFsmInfo.prTargetBssDesc;
+	else if ((eNetTypeIdx == NETWORK_TYPE_P2P_INDEX) && (prAdapter->rWifiVar.prP2pFsmInfo))
+		prBssDesc = prAdapter->rWifiVar.prP2pFsmInfo->prTargetBss;
+	if (prBssDesc) {
+#if (CFG_FORCE_USE_20BW == 1)
+		if (prBssDesc->eBand == BAND_2G4)
+			return FALSE;
+#endif
+		if (prBssDesc->eSco == CHNL_EXT_SCN)
+			return FALSE;
+	}
+
+	return TRUE;
 }
-
 

@@ -74,7 +74,7 @@ bool ofilm_otp_flag=0 ;
 
 static imgsensor_info_struct imgsensor_info = { 
 	.sensor_id = S5K3H7YX_SENSOR_ID,
-	.checksum_value = 0x9c198b8c,
+	.checksum_value = 0xe32ded8,
 	.pre = {
 		.pclk = 280000000,				//record different mode's pclk
 		.linelength = 3688,				//record different mode's linelength

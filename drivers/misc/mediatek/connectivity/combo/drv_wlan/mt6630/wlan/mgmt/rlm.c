@@ -1722,13 +1722,18 @@ rlmRecIeInfoForClient(P_ADAPTER_T prAdapter,
 	 *  The channel bandwidth of OP Mode IE  is  3, represent as 160/80+80MHz.
 	 */
 	if (fgHasOPModeIE == TRUE) {
-
-		/*Set the channel bandwidth of VHT operating is 0, represent as 20/40MHz */
-		if ((ucVhtOpModeChannelWidth == 0) || (ucVhtOpModeChannelWidth == 1)) {
+		if (ucVhtOpModeChannelWidth == 0) {
+			/*Set the channel bandwidth of VHT operating is 0,
+			together with other parameters, represent as 20M */
 			prBssInfo->ucVhtChannelWidth = 0;
-		}
-		/*Set the channel bandwidth of VHT operating is 1, represent as 80MHz */
-		else if (ucVhtOpModeChannelWidth == 2) {
+			prBssInfo->ucVhtChannelFrequencyS1 = 0;
+			prBssInfo->ucVhtChannelFrequencyS2 = 0;
+			prBssInfo->eBssSCO = CHNL_EXT_SCN;
+		} else if (ucVhtOpModeChannelWidth == 1) {
+			/*Set the channel bandwidth of VHT operating is 0, represent as 20/40MHz */
+			prBssInfo->ucVhtChannelWidth = 0;
+		} else if (ucVhtOpModeChannelWidth == 2) {
+			/*Set the channel bandwidth of VHT operating is 1, represent as 80MHz */
 			prBssInfo->ucVhtChannelWidth = 1;
 		}
 	}
@@ -1784,7 +1789,24 @@ rlmRecIeInfoForClient(P_ADAPTER_T prAdapter,
 		DBGLOG(RLM, INFO, ("Ch : DFS has Appeared\n"));
 	}
 #endif
+	if(!rlmDomainIsValidRfSetting(prAdapter, prBssInfo->eBand, 
+		prBssInfo->ucPrimaryChannel, prBssInfo->eBssSCO, 
+		prBssInfo->ucVhtChannelWidth, prBssInfo->ucVhtChannelFrequencyS1,
+		prBssInfo->ucVhtChannelFrequencyS2)) {
+	
+        /*Dump IE Inforamtion*/
+        DBGLOG(RLM, WARN, ("rlmRecIeInfoForClient IE Information\n"));
+        DBGLOG(RLM, WARN, ("IE Length = %d\n", u2IELength));
+        DBGLOG_MEM8(RLM, WARN, pucIE, u2IELength);
 
+        /*Error Handling for Non-predicted IE - Fixed to set 20MHz*/		 
+        prBssInfo->ucVhtChannelWidth = CW_20_40MHZ; 
+        prBssInfo->ucVhtChannelFrequencyS1 = 0;
+        prBssInfo->ucVhtChannelFrequencyS2 = 0;
+        prBssInfo->eBssSCO = CHNL_EXT_SCN;
+        prBssInfo->ucHtOpInfo1 &=
+			~(HT_OP_INFO1_SCO | HT_OP_INFO1_STA_CHNL_WIDTH);
+	}
 
 #if CFG_SUPPORT_QUIET && 0
 	if (!fgHasQuietIE) {
@@ -2151,9 +2173,17 @@ rlmProcessAssocRsp(P_ADAPTER_T prAdapter, P_SW_RFB_T prSwRfb, PUINT_8 pucIE, UIN
 	    ((prBssInfo->u2CapInfo & CAP_INFO_SHORT_SLOT_TIME)
 	     || (prBssInfo->eBand != BAND_2G4)) ? TRUE : FALSE;
 	ucPriChannel = rlmRecIeInfoForClient(prAdapter, prBssInfo, pucIE, u2IELength);
+	
+	if (prBssInfo->ucPrimaryChannel != ucPriChannel) {
+		DBGLOG(RLM, INFO,
+		("Use RF pri channel[%u].Pri channel in HT OP IE is :[%u]\n", prBssInfo->ucPrimaryChannel, ucPriChannel));
+	}
+    /*Avoid wrong primary channel info in HT operation IE info when accept association response*/
+#if 0
 	if (ucPriChannel > 0) {
 		prBssInfo->ucPrimaryChannel = ucPriChannel;
 	}
+#endif
 
 	if (!RLM_NET_IS_11N(prBssInfo) || !(prStaRec->u2HtCapInfo & HT_CAP_INFO_SUP_CHNL_WIDTH)) {
 		prBssInfo->fg40mBwAllowed = FALSE;

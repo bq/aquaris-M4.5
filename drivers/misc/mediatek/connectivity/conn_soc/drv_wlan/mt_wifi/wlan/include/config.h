@@ -926,6 +926,7 @@
 #else
     #define CFG_SUPPORT_CFG_FILE     1
 #endif
+#define CFG_SUPPORT_CE_FCC_TXPWR_LIMIT 0 /* Support CE FCC Tx Power limit */
 
 #define CFG_SUPPORT_802_11D             1 /*!< 1(default): Enable 802.11d
                                                      0: Disable */
@@ -953,9 +954,10 @@
 #define CFG_SUPPORT_TDLS_DBG		0	/* TDLS debug */
 #define CFG_SUPPORT_STATISTICS		1
 #define CFG_SUPPORT_DBG_POWERMODE	1	/* for debugging power always active mode */
+#define CFG_SUPPORT_BCN_TUNE		0	/* enhanced beacon tuning */
 
 #define CFG_SUPPORT_GSCN   1
-
+#define CFG_FORCE_USE_20BW			0
 /*------------------------------------------------------------------------------
  * SLT Option
  *------------------------------------------------------------------------------
@@ -1558,6 +1560,7 @@
 #define CFG_PRINT_RTP_PROFILE               0 //If want to enable WFD Debug, please change it to 1.
 #define CFG_PRINT_RTP_SN_SKIP               0
 
+#define CFG_SUPPORT_PWR_LIMIT_COUNTRY       1
 /*------------------------------------------------------------------------------
  * Flags of bus error tolerance
  *------------------------------------------------------------------------------

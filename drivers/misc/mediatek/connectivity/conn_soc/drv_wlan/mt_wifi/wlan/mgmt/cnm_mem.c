@@ -541,6 +541,7 @@ cnmMgtPktFree (
     }
 
     KAL_ACQUIRE_SPIN_LOCK(prAdapter, SPIN_LOCK_TX_MSDU_INFO_LIST);
+    prMsduInfo->fgIsBasicRate = FALSE;
     QUEUE_INSERT_TAIL(prQueList, &prMsduInfo->rQueEntry)
     KAL_RELEASE_SPIN_LOCK(prAdapter, SPIN_LOCK_TX_MSDU_INFO_LIST);
 }

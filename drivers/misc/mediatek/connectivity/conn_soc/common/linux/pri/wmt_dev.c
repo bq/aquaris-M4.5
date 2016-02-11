@@ -2490,17 +2490,8 @@ WMT_unlocked_ioctl (
 		break; 
 
 		case WMT_IOCTL_WMT_COREDUMP_CTRL:
-		{
-		    if (0 == arg)
-		    {
-		        mtk_wcn_stp_coredump_flag_ctrl(0);
-		    }
-			else
-			{
-			    mtk_wcn_stp_coredump_flag_ctrl(1);
-			}
-		}
-		break;
+				mtk_wcn_stp_coredump_flag_ctrl(arg);
+			break;
 		case WMT_IOCTL_WMT_QUERY_CHIPID:
 		{
 			iRet = mtk_wcn_wmt_chipid_query();

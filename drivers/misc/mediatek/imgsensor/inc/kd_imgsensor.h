@@ -111,6 +111,7 @@
 #define IMX091_SENSOR_ID                        0x0091
 #define IMX073_SENSOR_ID                        0x0046
 #define IMX058_SENSOR_ID                        0x0058
+#define IMX278_SENSOR_ID                        0x0278
 /*OV*/
 #define OV16825MIPI_SENSOR_ID                   0x016820
 #define OV13850_SENSOR_ID                       0xD850
@@ -266,6 +267,7 @@
 #define SENSOR_DRVNAME_IMX105_MIPI_RAW          "imx105mipiraw"
 #define SENSOR_DRVNAME_IMX091_MIPI_RAW          "imx091mipiraw"
 #define SENSOR_DRVNAME_IMX073_MIPI_RAW          "imx073mipiraw"
+#define SENSOR_DRVNAME_IMX278_MIPI_RAW          "imx278mipiraw"
 /*OV*/
 #define SENSOR_DRVNAME_OV16825_MIPI_RAW         "ov16825mipiraw"
 #define SENSOR_DRVNAME_OV13850_MIPI_RAW         "ov13850mipiraw"

@@ -691,6 +691,8 @@
 #if CFG_SUPPORT_AGPS_ASSIST
 #include <net/netlink.h>
 #endif
+#include <mach/mt_sleep.h>
+#include <mach/mt_spm_sleep.h>
 
 /*******************************************************************************
 *                              C O N S T A N T S
@@ -2430,7 +2432,6 @@ kalQoSFrameClassifierAndPacketInfo (
     OUT PUINT_8 pucEthDestAddr,
     OUT PBOOLEAN pfgIs1X,
     OUT PBOOLEAN pfgIsPAL,
-    OUT PBOOLEAN pfgIsNeedAck,
     OUT PUINT_8 pucNetworkType
     )
 {
@@ -2459,25 +2460,6 @@ kalQoSFrameClassifierAndPacketInfo (
 
     //4 <3> Obtain the User Priority for WMM
     u2EtherTypeLen = (aucLookAheadBuf[ETH_TYPE_LEN_OFFSET] << 8) | (aucLookAheadBuf[ETH_TYPE_LEN_OFFSET + 1]);
-
-	STATS_TX_PKT_INFO_DISPLAY(aucLookAheadBuf, pfgIsNeedAck);
-
-#if 0
-	if (u2EtherTypeLen == ETH_P_ARP)
-	{
-		UINT_8 *pucDstIp = &aucLookAheadBuf[ETH_HLEN];
-		if (pucDstIp[7] == ARP_PRO_REQ)
-		{
-			DBGLOG(INIT, TRACE, ("<tx> OS tx a arp req to %d.%d.%d.%d\n",
-				pucDstIp[24], pucDstIp[25], pucDstIp[26], pucDstIp[27]));
-		}
-		else if (pucDstIp[7] == ARP_PRO_RSP)
-		{
-			DBGLOG(INIT, TRACE, ("<tx> OS tx a arp rsp to %d.%d.%d.%d\n",
-				pucDstIp[14], pucDstIp[15], pucDstIp[16], pucDstIp[17]));
-		}
-	}
-#endif
 
     if ((u2EtherTypeLen == ETH_P_IP) &&
         (u4PacketLen >= LOOK_AHEAD_LEN)) {
@@ -2589,7 +2571,7 @@ kalOidComplete (
 
     //if (prGlueInfo->u4TimeoutFlag != 1) {
     prGlueInfo->rPendStatus = rOidStatus;
-	printk("kalOidComplete, caller: %p\n", __builtin_return_address(0));
+	/* printk("kalOidComplete, caller: %p\n", __builtin_return_address(0)); */
     complete(&prGlueInfo->rPendComp);
     prGlueInfo->u4OidCompleteFlag = 1;
     //}
@@ -2716,7 +2698,7 @@ kalIoctl (
     /* <9> Block and wait for event or timeout, current the timeout is 5 secs */
     //if (wait_for_completion_interruptible_timeout(&prGlueInfo->rPendComp, 5 * KAL_HZ)) {
     //if (!wait_for_completion_interruptible(&prGlueInfo->rPendComp)) {
-    printk("kalIoctl: before wait, caller: %p\n", __builtin_return_address(0));
+    /* printk("kalIoctl: before wait, caller: %p\n", __builtin_return_address(0)); */
     wait_for_completion(&prGlueInfo->rPendComp); {
         /* Case 1: No timeout. */
         /* if return WLAN_STATUS_PENDING, the status of cmd is stored in prGlueInfo  */
@@ -2737,7 +2719,7 @@ kalIoctl (
         ret = WLAN_STATUS_FAILURE;
     }
     #endif
-	printk("kalIoctl: done\n");
+	/* printk("kalIoctl: done\n"); */
     up(&prGlueInfo->ioctl_sem);
     up(&g_halt_sem);
 
@@ -3128,7 +3110,7 @@ int tx_thread(void *data)
                     }
 
                     if (prIoReq->rStatus != WLAN_STATUS_PENDING) {
-						printk("tx_thread, complete\n");
+						/* printk("tx_thread, complete\n"); */
                         complete(&prGlueInfo->rPendComp);
                     }
                     else {
@@ -4980,6 +4962,27 @@ UINT_64 kalGetBootTime(void)
 	bootTime *= USEC_PER_SEC;
 	bootTime += ts.tv_nsec/NSEC_PER_USEC;
 	return bootTime;
+}
+
+BOOLEAN kalIsWakeupByWlan(P_ADAPTER_T  prAdapter)
+{
+	/* fgIsSuspended is 1 means host wish to suspend, but may be failed
+		duo to some driver suspend failed. so we need help of function
+		slp_get_wake_reason */
+	if (atomic_read(&prAdapter->fgIsSuspended) == 0)
+		return FALSE;
+	/* if slp_get_wake_reason returns WR_WAKE_SRC, then it means
+		the host is suspend successfully. */
+	if (slp_get_wake_reason() != WR_WAKE_SRC)
+		return FALSE;
+#if (defined(CONFIG_ARCH_MT6735M) || defined(CONFIG_ARCH_MT6735))	
+	atomic_set(&prAdapter->fgIsSuspended, 0);
+	/* spm_get_last_wakeup_src will returns the last wakeup source, 
+		WAKE_SRC_CONN2AP is connsys */
+	return !!(spm_get_last_wakeup_src() & WAKE_SRC_CONN2AP);
+#else 
+	return FALSE;
+#endif
 }
 
 /*----------------------------------------------------------------------------*/

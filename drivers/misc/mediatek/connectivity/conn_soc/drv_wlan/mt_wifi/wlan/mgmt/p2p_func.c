@@ -1064,13 +1064,6 @@ p2pFuncDisconnect (
                         (P_SW_RFB_T)NULL,
                         u2ReasonCode,
                         (PFN_TX_DONE_HANDLER)p2pFsmRunEventDeauthTxDone);
-		    /* Change station state. */
-            cnmStaRecChangeState(prAdapter, prStaRec, STA_STATE_1);
-
-            /* Reset Station Record Status. */
-            p2pFuncResetStaRecStatus(prAdapter, prStaRec);
-
-		
         }
         else {
             /* Change station state. */

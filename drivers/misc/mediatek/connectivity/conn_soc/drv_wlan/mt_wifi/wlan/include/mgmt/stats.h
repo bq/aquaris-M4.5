@@ -270,7 +270,7 @@ do {																		\
 
 #define STATS_TX_TIME_TO_HIF				StatsEnvTxTime2Hif
 
-#define STATS_TX_PKT_INFO_DISPLAY			StatsTxPktInfoDisplay
+#define STATS_TX_PKT_CALLBACK				StatsTxPktCallBack
 #define STATS_TX_PKT_DONE_INFO_DISPLAY		StatsTxPktDoneInfoDisplay
 
 #define STATS_DRIVER_OWN_RESET()											\
@@ -300,7 +300,7 @@ do {																		\
 
 #define STATS_TX_TIME_ARRIVE(__Skb__)
 #define STATS_TX_TIME_TO_HIF(__MsduInfo__, __HwTxHeader__)
-#define STATS_TX_PKT_INFO_DISPLAY(__Pkt__, __fgIsNeedAck__)
+#define STATS_TX_PKT_CALLBACK(__Pkt__, __fgIsNeedAck__)
 #define STATS_TX_PKT_DONE_INFO_DISPLAY(__Adapter__, __Event__)
 
 #define STATS_DRIVER_OWN_RESET()
@@ -365,10 +365,10 @@ StatsRxPktInfoDisplay(
 	);
 
 VOID
-StatsTxPktInfoDisplay(
-	UINT_8								*pPkt,
-	PBOOLEAN							pfgIsNeedAck
-	);
+StatsTxPktCallBack(
+    UINT_8 								*pPkt,
+    P_MSDU_INFO_T 						prMsduInfo
+    );
 
 VOID
 StatsTxPktDoneInfoDisplay(

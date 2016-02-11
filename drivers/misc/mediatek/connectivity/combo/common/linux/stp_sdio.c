@@ -26,6 +26,7 @@
 #define STP_SDIO_TXPERFDBG 1	/* depends on STP_SDIO_DBG_SUPPORT */
 #define STP_SDIO_OWNBACKDBG 1	/* depends on STP_SDIO_DBG_SUPPORT */
 #define STP_SDIO_NEW_IRQ_HANDLER 1
+#define STP_SDIO_RETRY_LIMIT 2
 
 /*******************************************************************************
 *                    E X T E R N A L   R E F E R E N C E S
@@ -115,6 +116,7 @@ static INT32 stp_sdio_host_info_deinit(PPUINT8 ppTxBuf, PPUINT8 ppRxBuf);
 static INT32 stp_sdio_host_info_init(PPUINT8 ppTxBuf, PPUINT8 ppRxBuf);
 static INT32 stp_sdio_host_info_op(INT32 opId);
 static INT32 stp_sdio_rc_reg_readl_retry (MTK_WCN_HIF_SDIO_CLTCTX clt_ctx, UINT32 offset, UINT32 retry_limit, INT32 *p_ret);
+static INT32 stp_sdio_rc_reg_writel_retry (MTK_WCN_HIF_SDIO_CLTCTX clt_ctx, UINT32 offset, UINT32 value, UINT32 retry_limit, INT32 *p_ret);
 /*******************************************************************************
 *                           P R I V A T E   D A T A
 ********************************************************************************
@@ -428,7 +430,9 @@ static SDIO_PS_OP stp_sdio_get_own_state(VOID)
 	MTK_WCN_HIF_SDIO_CLTCTX clt_ctx;
 
 	clt_ctx = gp_info->sdio_cltctx;
-    i_ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
+	
+	chlcpr_value = stp_sdio_rc_reg_readl_retry (clt_ctx, CHLPCR, STP_SDIO_RETRY_LIMIT, &i_ret);
+    //i_ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
     if (i_ret) {
 		ret = OWN_SET;
 		STPSDIO_ERR_FUNC("read CHLPCR fail(%d), return\n", ret);
@@ -481,7 +485,8 @@ static INT32 stp_sdio_do_own_clr(INT32 wait)
 #if COHEC_00006052
 	    ret = mtk_wcn_hif_sdio_writeb(clt_ctx, (UINT32)(CHLPCR+0x1), (UINT8)(C_FW_OWN_REQ_CLR>>8));
 #else
-	    ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_OWN_REQ_CLR);
+		stp_sdio_rc_reg_writel_retry (clt_ctx, CHLPCR, C_FW_OWN_REQ_CLR, STP_SDIO_RETRY_LIMIT, &ret);
+	    //ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_OWN_REQ_CLR);
 #endif /* COHEC_00006052 */
 	    if (ret) {
 	        STPSDIO_ERR_FUNC("request firmware own back fail(%d)\n", ret);
@@ -493,7 +498,8 @@ static INT32 stp_sdio_do_own_clr(INT32 wait)
    	};
 	retry = 40;
 	do {
-		ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
+		chlcpr_value = stp_sdio_rc_reg_readl_retry (clt_ctx, CHLPCR, STP_SDIO_RETRY_LIMIT, &ret);
+		//ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
 		if (ret) {
 			/* 4 <1.1> get CHISR Rx error handling */
             STPSDIO_ERR_FUNC("get CHLPCR information rx error!(%d)\n", ret);
@@ -510,6 +516,18 @@ static INT32 stp_sdio_do_own_clr(INT32 wait)
 			    ("firmware ownback is no polled, wait for (%d us) and retry\n",
 			     delay_us);
 			udelay(delay_us);
+		}
+
+		if (0 == (retry - 1)%200) {
+#if COHEC_00006052
+			ret = mtk_wcn_hif_sdio_writeb(clt_ctx, (UINT32)(CHLPCR+0x1), (UINT8)(C_FW_OWN_REQ_CLR>>8));
+#else
+			ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_OWN_REQ_CLR);
+#endif /* COHEC_00006052 */
+			if (ret) {
+				STPSDIO_ERR_FUNC("request firmware own back fail(%d)\n", ret);
+			}
+			STPSDIO_ERR_FUNC ("own back failed in %d us, write again\n", 200*delay_us);
 		}
 	}
 	while (retry-- > 0);
@@ -819,30 +837,33 @@ static VOID stp_sdio_tx_rx_handling(PVOID pData)
 			}
 
 			if (0x0 == chisr) {
-            	gStpSdioDbgLvl = STPSDIO_LOG_DBG;
 				STPSDIO_ERR_FUNC("******CHISR == 0*****\n");
 
-				mtk_wcn_hif_sdio_readl(clt_ctx, CCIR, &val);
+				val = stp_sdio_rc_reg_readl_retry (clt_ctx, CCIR, STP_SDIO_RETRY_LIMIT, &iRet);
+				//mtk_wcn_hif_sdio_readl(clt_ctx, CCIR, &val);
 				STPSDIO_ERR_FUNC("******CCIR == 0x%x*****\n", val);
-				mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &val);
+				val = stp_sdio_rc_reg_readl_retry (clt_ctx, CHLPCR, STP_SDIO_RETRY_LIMIT, &iRet);
+				//mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &val);
 				STPSDIO_ERR_FUNC("******CHLPCR == 0x%x*****\n", val);
-				mtk_wcn_hif_sdio_readl(clt_ctx, CSDIOCSR, &val);
+				val = stp_sdio_rc_reg_readl_retry (clt_ctx, CSDIOCSR, STP_SDIO_RETRY_LIMIT, &iRet);
+				//mtk_wcn_hif_sdio_readl(clt_ctx, CSDIOCSR, &val);
 				STPSDIO_ERR_FUNC("******CSDIOCSR == 0x%x*****\n", val);
-				mtk_wcn_hif_sdio_readl(clt_ctx, CHCR, &val);
+				val = stp_sdio_rc_reg_readl_retry (clt_ctx, CHCR, STP_SDIO_RETRY_LIMIT, &iRet);
+				//mtk_wcn_hif_sdio_readl(clt_ctx, CHCR, &val);
 				STPSDIO_ERR_FUNC("******CHCR == 0x%x*****\n", val);
-				mtk_wcn_hif_sdio_readl(clt_ctx, CHISR, &val);
+				val = stp_sdio_rc_reg_readl_retry (clt_ctx, CHISR, STP_SDIO_RETRY_LIMIT, &iRet);
+				//mtk_wcn_hif_sdio_readl(clt_ctx, CHISR, &val);
 				STPSDIO_ERR_FUNC("******CHISR == 0x%x*****\n", val);
-				mtk_wcn_hif_sdio_readl(clt_ctx, CHIER, &val);
+				val = stp_sdio_rc_reg_readl_retry (clt_ctx, CHIER, STP_SDIO_RETRY_LIMIT, &iRet);
+				//mtk_wcn_hif_sdio_readl(clt_ctx, CHIER, &val);
 				STPSDIO_ERR_FUNC("******CHIER == 0x%x*****\n", val);
-				mtk_wcn_hif_sdio_readl(clt_ctx, CTFSR, &val);
+				val = stp_sdio_rc_reg_readl_retry (clt_ctx, CTFSR, STP_SDIO_RETRY_LIMIT, &iRet);
+				//mtk_wcn_hif_sdio_readl(clt_ctx, CTFSR, &val);
 				STPSDIO_ERR_FUNC("******CTFSR == 0x%x*****\n", val);
-				mtk_wcn_hif_sdio_readl(clt_ctx, CRPLR, &val);
+				val = stp_sdio_rc_reg_readl_retry (clt_ctx, CRPLR, STP_SDIO_RETRY_LIMIT, &iRet);
+				//mtk_wcn_hif_sdio_readl(clt_ctx, CRPLR, &val);
 				STPSDIO_ERR_FUNC("******CRPLR == 0x%x*****\n", val);
             }
-			else
-			{
-				gStpSdioDbgLvl = STPSDIO_LOG_INFO;
-			}
 
 			if (chisr & FW_OWN_BACK_INT) {
 				STPSDIO_HINT_FUNC("FW_OWN_BACK_INT\n");
@@ -916,13 +937,15 @@ static VOID stp_sdio_tx_rx_handling(PVOID pData)
 #if COHEC_00006052
 		iRet = mtk_wcn_hif_sdio_writeb(clt_ctx, CHLPCR, C_FW_INT_EN_SET);
 #else
-		iRet = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_INT_EN_SET);
+		stp_sdio_rc_reg_writel_retry (clt_ctx, CHLPCR, C_FW_INT_EN_SET, STP_SDIO_RETRY_LIMIT, &ret);
+		//iRet = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_INT_EN_SET);
 #endif				/* COHEC_00006052 */
 		if (iRet) {
 			STPSDIO_ERR_FUNC("enable IRQ fail. iRet:%d\n", iRet);
 		} else {
 			STPSDIO_HINT_FUNC("enable COM IRQ\n");
-			iRet = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
+			chlcpr_value = stp_sdio_rc_reg_readl_retry (clt_ctx, CHLPCR, STP_SDIO_RETRY_LIMIT, &iRet);
+			//iRet = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
 			if (iRet) {
 				STPSDIO_ERR_FUNC("read CHLPCR fail. iRet:%d\n", iRet);
 			} else {
@@ -966,12 +989,14 @@ static VOID stp_sdio_tx_rx_handling(PVOID pData)
 			    mtk_wcn_hif_sdio_writeb(clt_ctx, (UINT32) (CHLPCR + 0x01),
 						    (UINT8) (C_FW_OWN_REQ_SET >> 8));
 #else
-			iRet = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_OWN_REQ_SET);
+			stp_sdio_rc_reg_writel_retry (clt_ctx, CHLPCR, C_FW_OWN_REQ_SET, STP_SDIO_RETRY_LIMIT, &iRet);
+			//iRet = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_OWN_REQ_SET);
 #endif				/* COHEC_00006052 */
 			if (iRet) {
 				STPSDIO_ERR_FUNC("set firmware own! (sleeping) fail\n");
 			} else {
-				iRet = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
+				chlcpr_value = stp_sdio_rc_reg_readl_retry (clt_ctx, CHLPCR, STP_SDIO_RETRY_LIMIT, &iRet);
+				//iRet = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
 				if (iRet) {
 					STPSDIO_ERR_FUNC
 					    ("get firmware own! (sleeping) fail iRet:%d\n", iRet);
@@ -1001,9 +1026,10 @@ static VOID stp_sdio_tx_rx_handling(PVOID pData)
 									    (C_FW_OWN_REQ_CLR >>
 									     8));
 #else
-						iRet =
-						    mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR,
-									    C_FW_OWN_REQ_CLR);
+						stp_sdio_rc_reg_writel_retry (clt_ctx, CHLPCR, C_FW_OWN_REQ_CLR, STP_SDIO_RETRY_LIMIT, &iRet);
+						//iRet =
+						//   mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR,
+						//			    C_FW_OWN_REQ_CLR);
 #endif				/* COHEC_00006052 */
 					}
 				}
@@ -2150,12 +2176,14 @@ using CMD52 write instead of CMD53 write for CCIR, CHLPCR, CSDIOCSR */
 #if COHEC_00006052
 	iRet = mtk_wcn_hif_sdio_writeb(clt_ctx, CHLPCR, C_FW_INT_EN_CLR);
 #else
-	iRet = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_INT_EN_CLR);
+	stp_sdio_rc_reg_writel_retry (clt_ctx, CHLPCR, C_FW_INT_EN_CLR, STP_SDIO_RETRY_LIMIT, &iRet);
+	//iRet = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_INT_EN_CLR);
 #endif				/* COHEC_00006052 */
 	if (iRet) {
 		STPSDIO_ERR_FUNC("disalbe IRQ fail\n");
 	} else {
-		iRet = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
+		chlcpr_value = stp_sdio_rc_reg_readl_retry (clt_ctx, CHLPCR, STP_SDIO_RETRY_LIMIT, &iRet);
+		//iRet = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
 		if (iRet) {
 			STPSDIO_ERR_FUNC("read CHLPCR fail. iRet(%d)\n", iRet);
 		} else {
@@ -2354,7 +2382,8 @@ stp_sdio_ownback_poll(const MTK_WCN_HIF_SDIO_CLTCTX clt_ctx, UINT32 retry, UINT3
 	do {
 		/*ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHISR, &chisr_value); */
 		/* 20111020: change to poll CHLPCR instead of read-cleared CHISR */
-		ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlpcr);
+		chlpcr = stp_sdio_rc_reg_readl_retry (clt_ctx, CHLPCR, STP_SDIO_RETRY_LIMIT, &ret);
+		//ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlpcr);
 		if (ret) {
 			/* 4 <1.1> get CHISR Rx error handling */
 			STPSDIO_ERR_FUNC("get CHLPCR information rx error!(%d)\n", ret);
@@ -2486,7 +2515,8 @@ using CMD52 write instead of CMD53 write for CCIR, CHLPCR, CSDIOCSR */
 	    mtk_wcn_hif_sdio_writeb(clt_ctx, (UINT32) (CHLPCR + 0x1),
 				    (UINT8) (C_FW_OWN_REQ_CLR >> 8));
 #else
-	ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_OWN_REQ_CLR);
+	stp_sdio_rc_reg_writel_retry (clt_ctx, CHLPCR, C_FW_OWN_REQ_CLR, STP_SDIO_RETRY_LIMIT, &iRet);
+	//ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_OWN_REQ_CLR);
 #endif				/* COHEC_00006052 */
 	if (ret) {
 		STPSDIO_ERR_FUNC("request FW-Own back fail!(%d)\n", ret);
@@ -2506,9 +2536,12 @@ using CMD52 write instead of CMD53 write for CCIR, CHLPCR, CSDIOCSR */
 	mtk_wcn_hif_sdio_enable_irq(clt_ctx, MTK_WCN_BOOL_TRUE);
 	/* 4 <4> enabling all host interrupt except abnormal ones */
 	/* ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHIER, (CHISR_EN_15_7|CHISR_EN_3_0));  */ /* enable CHISR interrupt output */
-	ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHIER, (FIRMWARE_INT | TX_FIFO_OVERFLOW |
-						       FW_INT_IND_INDICATOR | TX_COMPLETE_COUNT |
-						       TX_UNDER_THOLD | TX_EMPTY | RX_DONE));
+	stp_sdio_rc_reg_writel_retry (clt_ctx, CHIER, (FIRMWARE_INT | TX_FIFO_OVERFLOW |
+				FW_INT_IND_INDICATOR | TX_COMPLETE_COUNT |
+				TX_UNDER_THOLD | TX_EMPTY | RX_DONE), STP_SDIO_RETRY_LIMIT, &ret);
+	//ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHIER, (FIRMWARE_INT | TX_FIFO_OVERFLOW |
+	//					       FW_INT_IND_INDICATOR | TX_COMPLETE_COUNT |
+	//					       TX_UNDER_THOLD | TX_EMPTY | RX_DONE));
 	if (ret) {
 		STPSDIO_ERR_FUNC("set interrupt output fail!(%d)\n", ret);
 		goto out;
@@ -2519,13 +2552,15 @@ using CMD52 write instead of CMD53 write for CCIR, CHLPCR, CSDIOCSR */
 #if COHEC_00006052
 	ret = mtk_wcn_hif_sdio_writeb(clt_ctx, CHLPCR, C_FW_INT_EN_SET);	/* enable interrupt */
 #else
-	ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHLPCR, C_FW_INT_EN_SET);	/* enable interrupt */
+	stp_sdio_rc_reg_writel_retry (clt_ctx, CHIER, C_FW_INT_EN_SET, STP_SDIO_RETRY_LIMIT, &ret);
+	//ret = mtk_wcn_hif_sdio_writel(clt_ctx, CHIER, C_FW_INT_EN_SET);	/* enable interrupt */
 #endif				/* COHEC_00006052 */
 	if (ret) {
 		STPSDIO_ERR_FUNC("enable interrupt fail!(%d)\n", ret);
 		goto out;
 	}
-	ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
+	chlcpr_value = stp_sdio_rc_reg_readl_retry (clt_ctx, CHLPCR, STP_SDIO_RETRY_LIMIT, &ret);
+	//ret = mtk_wcn_hif_sdio_readl(clt_ctx, CHLPCR, &chlcpr_value);
 	if (ret) {
 		STPSDIO_ERR_FUNC("Read CHLPCR fail!(%d)\n", ret);
 		goto out;
@@ -2633,12 +2668,12 @@ static INT32 stp_sdio_rc_reg_readl_retry (MTK_WCN_HIF_SDIO_CLTCTX clt_ctx, UINT3
 	UINT32 card_id = CLTCTX_CID(clt_ctx);
 	if (card_id != 0x6630)
 	{
-		STPSDIO_INFO_FUNC("card_id is :0x%x, does not support CSR (Common Snapshot Register)\n", card_id);
+		STPSDIO_LOUD_FUNC("card_id is :0x%x, does not support CSR (Common Snapshot Register)\n", card_id);
 		if (p_ret)
 			*p_ret = 0;
 		return value;
 	}
-	STPSDIO_INFO_FUNC("clt_ctx:0x%x, offset:0x%x, retry_limit:%d\n", clt_ctx, offset, retry_limit);
+	STPSDIO_LOUD_FUNC("clt_ctx:0x%x, offset:0x%x, retry_limit:%d\n", clt_ctx, offset, retry_limit);
 
 	retry_limit = retry_limit == 0 ? 1 : retry_limit;
 	retry_limit = retry_limit > MAX_RETRY_NUM ? MAX_RETRY_NUM : retry_limit;
@@ -2649,6 +2684,42 @@ static INT32 stp_sdio_rc_reg_readl_retry (MTK_WCN_HIF_SDIO_CLTCTX clt_ctx, UINT3
 		if (ret != 0)
 		{
 			STPSDIO_ERR_FUNC("read Common Snapshot Register failed, ret:%d\n", ret);
+		}else
+		{
+			STPSDIO_DBG_FUNC("CSR:0x%x\n", value);
+			break;
+		}
+		retry_limit--;
+	}
+	if (p_ret)
+		*p_ret = ret;
+	return value;
+}
+
+static INT32 stp_sdio_rc_reg_writel_retry (MTK_WCN_HIF_SDIO_CLTCTX clt_ctx, UINT32 offset, UINT32 value, UINT32 retry_limit, INT32 *p_ret)
+{
+	INT32 ret = -1;
+	#define MAX_RETRY_NUM 100
+	
+	UINT32 card_id = CLTCTX_CID(clt_ctx);
+	if (card_id != 0x6630)
+	{
+		STPSDIO_LOUD_FUNC("card_id is :0x%x, does not support CSR (Common Snapshot Register)\n", card_id);
+		if (p_ret)
+			*p_ret = 0;
+		return value;
+	}
+	STPSDIO_LOUD_FUNC("clt_ctx:0x%x, offset:0x%x, retry_limit:%d\n", clt_ctx, offset, retry_limit);
+
+	retry_limit = retry_limit == 0 ? 1 : retry_limit;
+	retry_limit = retry_limit > MAX_RETRY_NUM ? MAX_RETRY_NUM : retry_limit;
+	
+	while (retry_limit > 0)
+	{
+		ret = mtk_wcn_hif_sdio_writel(clt_ctx, offset, value);
+		if (ret != 0)
+		{
+			STPSDIO_ERR_FUNC("write Common Snapshot Register failed, ret:%d\n", ret);
 		}else
 		{
 			STPSDIO_DBG_FUNC("CSR:0x%x\n", value);

@@ -85,3 +85,12 @@ endif
 ifeq ($(CONFIG_MTK_DA213),y)
 obj-y   +=  da213/
 endif
+
+ifeq ($(CONFIG_MTK_GMA303),y)
+obj-y   +=  gma303/
+endif
+
+ifeq ($(CONFIG_MTK_MC6470_ACC),y)
+obj-y   +=  mc6470_acc/
+endif
+

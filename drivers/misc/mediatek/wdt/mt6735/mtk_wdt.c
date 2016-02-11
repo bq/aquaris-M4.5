@@ -368,6 +368,30 @@ void wdt_arch_reset(char mode)
 	
 }
 
+int mtk_rgu_dram_reserved(int enable)
+{
+    volatile unsigned int tmp;
+    if(1 == enable) 
+    {
+        /* enable ddr reserved mode */
+        tmp = DRV_Reg32(MTK_WDT_MODE);
+        tmp |= (MTK_WDT_MODE_DDR_RESERVE|MTK_WDT_MODE_KEY);
+        DRV_WriteReg32(MTK_WDT_MODE, tmp);                        
+                        
+    } else if(0 == enable)
+    {
+        /* disable ddr reserved mode, set reset mode, 
+               disable watchdog output reset signal */
+        tmp = DRV_Reg32(MTK_WDT_MODE);
+        tmp &= (~MTK_WDT_MODE_DDR_RESERVE);
+        tmp |= MTK_WDT_MODE_KEY;
+        DRV_WriteReg32(MTK_WDT_MODE, tmp);        
+    }
+	printk("mtk_rgu_dram_reserved:MTK_WDT_MODE(0x%x)\n", DRV_Reg32(MTK_WDT_MODE));
+	
+    return 0;
+}
+
 int mtk_wdt_swsysret_config(int bit,int set_value)
 {
     unsigned int wdt_sys_val;
@@ -553,6 +577,7 @@ int mtk_wdt_swsysret_config(int bit,int set_value){ return 0;}
 int mtk_wdt_request_mode_set(int mark_bit,WD_REQ_MODE mode){return 0;}
 int mtk_wdt_request_en_set(int mark_bit,WD_REQ_CTL en){return 0;}
 void mtk_wdt_set_c2k_sysrst(unsigned int flag){}
+int mtk_rgu_dram_reserved(int enable){ return 0;}
 
 #endif //#ifndef __USING_DUMMY_WDT_DRV__
 
@@ -728,6 +753,9 @@ static int mtk_wdt_probe(struct platform_device *dev)
 	interval_val |= (KERNEL_MAGIC);
 	/* Write back INTERVAL REG */
 	DRV_WriteReg32(MTK_WDT_INTERVAL, interval_val);
+
+	//default disable request by preserved mode owner
+	mtk_rgu_dram_reserved(0);
 #endif
    udelay(100);
    	printk("mtk_wdt_probe : done WDT_MODE(%x),MTK_WDT_NONRST_REG(%x)\n",DRV_Reg32(MTK_WDT_MODE),DRV_Reg32(MTK_WDT_NONRST_REG));

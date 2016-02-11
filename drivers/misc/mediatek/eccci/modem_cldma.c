@@ -411,7 +411,7 @@ fill_and_move:
             #endif
 
             // allocate a new skb and change skb pointer
-            req->skb = ccci_alloc_skb(rx_queue_buffer_size[queue->index], blocking);
+            req->skb = ccci_alloc_skb(rx_queue_buffer_size[queue->index], !IS_PASS_SKB(md, queue->index) , blocking);
 
             #ifdef CLDMA_TRACE
             time2 = sched_clock()-time2;
@@ -514,7 +514,7 @@ static void cldma_rx_done(struct work_struct *work)
     }
     total_time = sched_clock();
 #endif
-	count=cldma_rx_collect(queue, queue->budget, !IS_PASS_SKB(md,queue->index), &result,&rx_bytes);
+	count=cldma_rx_collect(queue, queue->budget, 1, &result,&rx_bytes);
 //Trace end
 #ifdef CLDMA_TRACE    
     if(count){
@@ -2465,18 +2465,21 @@ static int md_cd_send_runtime_data(struct ccci_modem *md, unsigned int sbp_code)
 #ifdef FEATURE_C2K_ALWAYS_ON
     runtime->support_mask |= (FEATURE_SUPPORT<<(MISC_MD_C2K_ON*2));
     runtime->feature_7_val[0] = 
-        (0
-#ifdef CONFIG_MTK_C2K_SUPPORT
+        ( 0
+    #ifdef CONFIG_MTK_C2K_SUPPORT
         | (1<<0)
-#endif
-#ifdef CONFIG_MTK_SVLTE_SUPPORT
+    #endif
+    #ifdef CONFIG_MTK_SVLTE_SUPPORT
         | (1<<1)
-#endif
-#ifdef CONFIG_MTK_SRLTE_SUPPORT
+    #endif
+		#ifdef CONFIG_MTK_SRLTE_SUPPORT
         | (1<<2)
-#endif
+		#endif
 #ifdef CONFIG_MTK_C2K_OM_SOLUTION1
         | (1<<3)
+#endif
+#ifdef CONFIG_MTK_CT6M_SUPPORT
+        | (1<<4)
 #endif
         );
 #endif
@@ -2605,14 +2608,18 @@ static int md_cd_dump_info(struct ccci_modem *md, MODEM_DUMP_FLAG flag, void *bu
 		req = list_entry(md_ctrl->rxq[0].tr_ring, struct ccci_request, entry);
 		cldma_dump_gpd_ring(md->index,req->gpd_addr, rx_queue_buffer_number[0]);
 	}
-
+	if (flag & DUMP_FLAG_SMEM_MDSLP) {
+		ccci_cmpt_mem_dump(md->index, md->smem_layout.ccci_exp_smem_sleep_debug_vir,
+			md->smem_layout.ccci_exp_smem_sleep_debug_size);
+	}
+	if (flag & DUMP_FLAG_MD_WDT) {
 	CCCI_INF_MSG(md->index, KERN, "Dump MD RGU registers\n");
     md_cd_lock_modem_clock_src(1);
     ccci_mem_dump(md->index, md_ctrl->md_rgu_base, 0x30);
     md_cd_lock_modem_clock_src(0);
 	CCCI_INF_MSG(md->index, KERN, "wdt_enabled=%d\n", atomic_read(&md_ctrl->wdt_enabled));
 	mt_irq_dump_status(md_ctrl->hw_info->md_wdt_irq_id);
-
+	}
     return length;
 }
 
@@ -2681,6 +2688,8 @@ static ssize_t md_cd_dump_store(struct ccci_modem *md, const char *buf, size_t c
     if(strncmp(buf, "layout", count-1) == 0) {
         md->ops->dump_info(md, DUMP_FLAG_LAYOUT, NULL, 0);
     }
+	if (strncmp(buf, "mdslp", count - 1) == 0)
+		md->ops->dump_info(md, DUMP_FLAG_SMEM_MDSLP, NULL, 0);
     return count;
 }
 

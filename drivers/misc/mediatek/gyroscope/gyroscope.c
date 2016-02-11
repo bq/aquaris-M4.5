@@ -15,6 +15,7 @@ static void gyro_work_func(struct work_struct *work)
 	//int out_size;
 	//hwm_sensor_data sensor_data;
 	int x,y,z,status;
+	static int g_flag=0; /*bosch add fot cts verify*/
 	int64_t  nt;
 	struct timespec time; 
 	int err = 0;	
@@ -31,9 +32,15 @@ static void gyro_work_func(struct work_struct *work)
 	time = get_monotonic_coarse(); 
 	nt = time.tv_sec*1000000000LL+time.tv_nsec;
 	
-    //add wake lock to make sure data can be read before system suspend
+	//add wake lock to make sure data can be read before system suspend
 	cxt->gyro_data.get_data(&x,&y,&z,&status);
-
+/*bosch add fot cts verify start*/
+	g_flag = !g_flag;
+	if(g_flag)
+		z++;
+	else
+		z--;
+/*bosch add fot cts verify end!!*/
 	if(err)
 	{
 		GYRO_ERR("get gyro data fails!!\n" );

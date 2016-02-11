@@ -445,7 +445,7 @@
 
 #define CFG_TX_STOP_NETIF_QUEUE_THRESHOLD   256 /* packets */
 
-#define CFG_TX_STOP_NETIF_PER_QUEUE_THRESHOLD   512  /* packets */
+#define CFG_TX_STOP_NETIF_PER_QUEUE_THRESHOLD   256  /* packets */
 #define CFG_TX_START_NETIF_PER_QUEUE_THRESHOLD  128  /* packets */
 
 
@@ -470,9 +470,11 @@
 
 #define IP_PRO_ICMP								0x01
 #define IP_PRO_UDP								0x11
+#define IP_PRO_TCP								0x06
 
 #define UDP_PORT_DHCPS							0x43
 #define UDP_PORT_DHCPC							0x44
+#define UDP_PORT_DNS							0x35
 
 #define IPVH_VERSION_OFFSET                     4 // For Little-Endian
 #define IPVH_VERSION_MASK                       0xF0
@@ -957,6 +959,8 @@ struct _GLUE_INFO_T {
     UINT_64		    u8TotalFailCnt;
     UINT_32 		    u4LinkspeedThreshold;
     INT_32 		    i4RssiThreshold;
+    INT_32                  i4RssiCache;
+    UINT_32                 u4LinkSpeedCache;
 
 #if (CFG_SUPPORT_TDLS == 1)
 	TDLS_INFO_T				rTdlsLink;

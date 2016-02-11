@@ -30,7 +30,7 @@ struct ccci_skb_queue {
 	struct work_struct reload_work;
 };
 
-struct sk_buff *ccci_alloc_skb(int size, char blocking);
+struct sk_buff *ccci_alloc_skb(int size, char frompool, char blocking);
 void ccci_free_skb(struct sk_buff *skb, DATA_POLICY policy);
 	
 struct ccci_request *ccci_alloc_req(DIRECTION dir, int size, char blk1, char blk2);

@@ -1497,24 +1497,20 @@ static void Audio_Amp_Change(int channels , bool enable)
             printk("Audio_Amp_Change off amp\n");
             HeadsetVoloumeRestore();// Set HPR/HPL gain as -1dB, step by step
             //Ana_Set_Reg(ZCD_CON2, 0x0F9F, 0xffff); //Set HPR/HPL gain as minimum (~ -40dB)
-            Ana_Set_Reg(AUDDEC_ANA_CON0, 0xF40F, 0xffff); //Disable HPR/HPL
+//            Ana_Set_Reg(AUDDEC_ANA_CON0, 0xF40F, 0xffff); //Disable HPR/HPL
+            Ana_Set_Reg(AUDDEC_ANA_CON0, 0x0000, 0xffff); //Disable Audio DAC            
         }
-        else if (channels == AUDIO_ANALOG_CHANNELS_LEFT1)
-        {
-        }
-        else if (channels == AUDIO_ANALOG_CHANNELS_RIGHT1)
-        {
-        }
+
         if (GetDLStatus() == false)
         {
             Ana_Set_Reg(AUDDEC_ANA_CON4, 0x0000, 0xffff); //Disable drivers bias circuit
-            Ana_Set_Reg(AUDDEC_ANA_CON0, 0x0000, 0xffff); //Disable Audio DAC
+//            Ana_Set_Reg(AUDDEC_ANA_CON0, 0x0000, 0xffff); //Disable Audio DAC
             Ana_Set_Reg(AUDDEC_ANA_CON6, 0x2AC0, 0xfeeb); //Disable AUD_CLK, bit2/4/8 is for ADC, do not set
             Ana_Set_Reg(AUDDEC_ANA_CON7, 0x0000, 0x8000); //Disable NV regulator (-1.5V)
             Ana_Set_Reg(AUDDEC_ANA_CON6, 0x0001, 0xfeeb); //Disable cap-less LDOs (1.5V) & Disable IBIST
             TurnOffDacPower();
         }
-        EnableDcCompensation(false);
+//        EnableDcCompensation(false);
     }
 }
 
@@ -2216,7 +2212,7 @@ static int Headset_Speaker_Amp_Set(struct snd_kcontrol *kcontrol, struct snd_ctl
 
 #ifdef CONFIG_MTK_SPEAKER
 static const char *speaker_amp_function[] = {"CALSSD", "CLASSAB", "RECEIVER"};
-static const char *speaker_PGA_function[] = {"4Db", "5Db", "6Db", "7Db", "8Db", "9Db", "10Db",
+static const char *speaker_PGA_function[] = {"MUTE", "0Db", "4Db", "5Db", "6Db", "7Db", "8Db", "9Db", "10Db",
                                              "11Db", "12Db", "13Db", "14Db", "15Db", "16Db", "17Db"
                                             };
 static const char *speaker_OC_function[] = {"Off", "On"};
@@ -2398,7 +2394,7 @@ static int Lineout_PGAL_Set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_v
     int index = 0;
     printk("%s(), index = %d\n", __func__, ucontrol->value.enumerated.item[0]);
 
-    if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(DAC_DL_PGA_Speaker_GAIN))
+    if (ucontrol->value.enumerated.item[0] >= ARRAY_SIZE(DAC_DL_PGA_Speaker_GAIN))
     {
         printk("return -EINVAL\n");
         return -EINVAL;
@@ -2427,7 +2423,7 @@ static int Lineout_PGAR_Set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_v
     int index = 0;
     printk("%s(), index = %d\n", __func__, ucontrol->value.enumerated.item[0]);
 
-    if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(DAC_DL_PGA_Speaker_GAIN))
+    if (ucontrol->value.enumerated.item[0] >= ARRAY_SIZE(DAC_DL_PGA_Speaker_GAIN))
     {
         printk("return -EINVAL\n");
         return -EINVAL;
@@ -2457,7 +2453,7 @@ static int Handset_PGA_Set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_va
 
     printk("%s(), index = %d\n", __func__, ucontrol->value.enumerated.item[0]);
 
-    if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(DAC_DL_PGA_Handset_GAIN))
+    if (ucontrol->value.enumerated.item[0] >= ARRAY_SIZE(DAC_DL_PGA_Handset_GAIN))
     {
         printk("return -EINVAL\n");
         return -EINVAL;
@@ -2487,7 +2483,7 @@ static int Headset_PGAL_Set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_v
 
     //printk("%s(), index = %d arraysize = %d \n", __func__, ucontrol->value.enumerated.item[0], ARRAY_SIZE(DAC_DL_PGA_Headset_GAIN)); //mark for 64bit build fail
 
-    if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(DAC_DL_PGA_Headset_GAIN))
+    if (ucontrol->value.enumerated.item[0] >= ARRAY_SIZE(DAC_DL_PGA_Headset_GAIN))
     {
         printk("return -EINVAL\n");
         return -EINVAL;
@@ -2518,7 +2514,7 @@ static int Headset_PGAR_Set(struct snd_kcontrol *kcontrol, struct snd_ctl_elem_v
 
     printk("%s(), index = %d\n", __func__, ucontrol->value.enumerated.item[0]);
 
-    if (ucontrol->value.enumerated.item[0] > ARRAY_SIZE(DAC_DL_PGA_Headset_GAIN))
+    if (ucontrol->value.enumerated.item[0] >= ARRAY_SIZE(DAC_DL_PGA_Headset_GAIN))
     {
         printk("return -EINVAL\n");
         return -EINVAL;
@@ -2718,19 +2714,33 @@ static bool TurnOnADcPowerACC(int ADCType, bool enable)
         else if (ADCType == AUDIO_ANALOG_DEVICE_IN_ADC2) //ref mic
         {
             printk("%s  AUDIO_ANALOG_DEVICE_IN_ADC2 refmic_using_ADC_L =%d \n", __func__, refmic_using_ADC_L);
-            SetDCcoupleNP(AUDIO_MIC_BIAS0, mAudio_Analog_Mic2_mode); //micbias0 DCCopuleNP
-            //Ana_Set_Reg(AUDENC_ANA_CON9, 0x0201, 0xff09); //Enable MICBIAS0, MISBIAS0 = 1P9V
-            Ana_Set_Reg(AUDENC_ANA_CON9, 0x0211, 0xff19); //Enable MICBIAS0, MISBIAS0 = 1P9V, also enable MICBIAS1 at the same time to avoid noise
-            if (refmic_using_ADC_L == false)
-            {
-//                Ana_Set_Reg(AUDENC_ANA_CON15, 0x0030, 0x00f0); //Audio R PGA 18 dB gain(SMT)
-                Ana_Set_Reg(AUDENC_ANA_CON10, 0x0033, 0x00ff); //Audio R PGA 18 dB gain(SMT) MT6328
-            }
-            else
-            {
-//                Ana_Set_Reg(AUDENC_ANA_CON15, 0x0003, 0x000f); //Audio L PGA 18 dB gain(SMT)
-                Ana_Set_Reg(AUDENC_ANA_CON10, 0x0003, 0x000f); //Audio L PGA 18 dB gain(SMT) MT6328
-            }
+			SetDCcoupleNP(AUDIO_MIC_BIAS0, mAudio_Analog_Mic2_mode);
+			/* micbias0 DCCopuleNP */
+
+			if (mCodec_data->mAudio_Ana_Mux[AUDIO_MICSOURCE_MUX_IN_1] == 1) {
+				/*Enable MICBIAS0, MISBIAS0 = 2P7V */
+				Ana_Set_Reg(AUDENC_ANA_CON9, 0x0710, 0xff90);
+
+			} else {
+				/* "ADC2", headset mic */
+				SetDCcoupleNP(AUDIO_MIC_BIAS1, mAudio_Analog_Mic1_mode);
+				/* micbias1 DCCopuleNP */
+				Ana_Set_Reg(AUDENC_ANA_CON9, 0x0211, 0xff19);
+				/* Enable MICBIAS1, MISBIAS1 = 1P9V// or 2P7V George? */
+				/* Enable MICBIAS0, MISBIAS0 = 1P9V, also enable MICBIAS1 at the same time to avoid noise */				
+			}
+
+
+			if (refmic_using_ADC_L == false) {
+				/* Ana_Set_Reg(AUDENC_ANA_CON15, 0x0030, 0x00f0); //Audio R PGA 18 dB gain(SMT) */
+				Ana_Set_Reg(AUDENC_ANA_CON10, 0x0033, 0x00ff);
+				/* Audio R PGA 18 dB gain(SMT) MT6328 */
+			} else {
+				/* Ana_Set_Reg(AUDENC_ANA_CON15, 0x0003, 0x000f);
+				//Audio L PGA 18 dB gain(SMT) */
+				Ana_Set_Reg(AUDENC_ANA_CON10, 0x0003, 0x000f);
+				/* Audio L PGA 18 dB gain(SMT) MT6328 */
+			}
         }
 
         if (ADCType == AUDIO_ANALOG_DEVICE_IN_ADC1) //main and headset mic

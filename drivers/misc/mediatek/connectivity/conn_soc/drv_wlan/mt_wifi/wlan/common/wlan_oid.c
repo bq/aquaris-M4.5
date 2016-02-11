@@ -1962,9 +1962,10 @@ wlanoidSetConnect(
     // re-association check
     if(kalGetMediaStateIndicated(prGlueInfo) == PARAM_MEDIA_STATE_CONNECTED) {
         if(fgEqualSsid) {
-			prAisAbortMsg->ucReasonOfDisconnect = DISCONNECT_REASON_CODE_REASSOCIATION;
+			prAisAbortMsg->ucReasonOfDisconnect = DISCONNECT_REASON_CODE_ROAMING;
             if (fgEqualBssid) {
 				kalSetMediaStateIndicated(prGlueInfo, PARAM_MEDIA_STATE_TO_BE_INDICATED);
+				prAisAbortMsg->ucReasonOfDisconnect = DISCONNECT_REASON_CODE_REASSOCIATION;
             }
         }
         else {
@@ -5544,8 +5545,7 @@ wlanoidQueryLinkSpeed(
     }
 
     if (kalGetMediaStateIndicated(prAdapter->prGlueInfo) != PARAM_MEDIA_STATE_CONNECTED) {
-        *(PUINT_32)pvQueryBuffer = 10000; // change to unit of 100bps
-        return WLAN_STATUS_SUCCESS;
+        return WLAN_STATUS_ADAPTER_NOT_READY;
     }
     else if (prAdapter->fgIsLinkRateValid == TRUE &&
             (kalGetTimeTick() - prAdapter->rLinkRateUpdateTime) <= CFG_LINK_QUALITY_VALID_PERIOD) {

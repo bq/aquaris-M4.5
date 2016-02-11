@@ -1334,7 +1334,20 @@ aisFsmStateInit_JOIN (
     //4 <1> We are going to connect to this BSS.
     prBssDesc->fgIsConnecting = TRUE;
 
-
+	/* send deauth before auth.
+		we do that because if AP didn't know we have disconnected, AP may still maintain
+		power save status. and only deauth frame can trigger AP clear power save status */
+	wlanSendSetQueryCmd(prAdapter,
+		CMD_ID_SEND_DEAUTH,
+		TRUE,
+		FALSE,
+		FALSE,
+		NULL,
+		NULL,
+		MAC_ADDR_LEN,
+		(PUINT_8)prBssDesc->aucBSSID,
+		NULL,
+		0);
     //4 <2> Setup corresponding STA_RECORD_T
     prStaRec = bssCreateStaRecFromBssDesc(prAdapter,
             STA_TYPE_LEGACY_AP,
@@ -2658,7 +2671,7 @@ aisFsmRunEventAbort (
         prConnSettings->fgIsDisconnectedByNonRequest = FALSE;
     }
 	/* to support user space triggered roaming */
-	if (ucReasonOfDisconnect == DISCONNECT_REASON_CODE_REASSOCIATION &&
+	if (ucReasonOfDisconnect == DISCONNECT_REASON_CODE_ROAMING &&
 			prAisFsmInfo->eCurrentState != AIS_STATE_DISCONNECTING) {
 
 	    if(prAisFsmInfo->eCurrentState == AIS_STATE_NORMAL_TR &&
@@ -4113,6 +4126,10 @@ aisFsmRunEventScanDoneTimeOut (
     prAisFsmInfo = &(prAdapter->rWifiVar.rAisFsmInfo);
     prConnSettings = &(prAdapter->rWifiVar.rConnSettings);
     HifInfo = &prAdapter->prGlueInfo->rHifInfo;
+	
+	/* Anyway, clear prGlueInfo->prScanRequest here, */
+	if(prAdapter->prGlueInfo)
+		prAdapter->prGlueInfo->prScanRequest = NULL;
 
     DBGLOG(AIS, STATE, ("aisFsmRunEventScanDoneTimeOut Current[%d]\n",prAisFsmInfo->eCurrentState));
 	DBGLOG(AIS, STATE, ("Isr/task %u %u %u (0x%x)\n",

@@ -990,6 +990,10 @@ struct _GLUE_INFO_T {
     struct net_device *prMonDevHandler;
 	struct work_struct monWork;
 #endif
+
+    INT_32                  i4RssiCache;
+    UINT_32                 u4LinkSpeedCache;
+
 };
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2, 6, 0)

@@ -130,6 +130,7 @@ INT32 stp_notify_btm_handle_wmt_lte_coex(MTKSTP_BTM_T *stp_btm);
 INT32 wcn_psm_flag_trigger_collect_ftrace(void);
 
 MTKSTP_BTM_T *stp_btm_init(void);
+extern unsigned int g_coredump_mode;
 
 /*******************************************************************************
 *                              F U N C T I O N S

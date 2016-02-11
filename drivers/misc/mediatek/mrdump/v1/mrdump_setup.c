@@ -5,6 +5,7 @@
 #include <asm/memory.h>
 #include <asm/page.h>
 #include <asm/io.h>
+#include <mach/wd_api.h>
 
 #define MRDUMP_CB_ADDR (PHYS_OFFSET + 0x1F00000)
 #define MRDUMP_CB_SIZE 0x2000
@@ -14,6 +15,10 @@
 
 static void mrdump_hw_enable(bool enabled)
 {
+    struct wd_api *wd_api = NULL;
+    get_wd_api(&wd_api);
+    if(wd_api)
+        wd_api->wd_dram_reserved_mode(enabled);
 }
 
 static void mrdump_reboot(void)

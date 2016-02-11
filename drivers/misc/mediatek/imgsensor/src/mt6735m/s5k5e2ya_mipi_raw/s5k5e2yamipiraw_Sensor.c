@@ -69,9 +69,7 @@ void S5K5E2YA_MIPI_update_wb_register_from_otp(void);
 
 static imgsensor_info_struct imgsensor_info = { 
 	.sensor_id = S5K5E2YA_SENSOR_ID,
-	
-	.checksum_value = 0x87e356d9,
-	
+	.checksum_value = 0xa48ebf5d,
 	.pre = {
 		.pclk = 179200000,				//record different mode's pclk
 		.linelength = 2950,				//record different mode's linelength
@@ -163,7 +161,7 @@ static imgsensor_info_struct imgsensor_info = {
 	.sensor_output_dataformat = SENSOR_OUTPUT_FORMAT_RAW_Gr,
 	.mclk = 24,
 	.mipi_lane_num = SENSOR_MIPI_2_LANE,
-	.i2c_addr_table = {0x20,0xff},
+	.i2c_addr_table = {0x20, 0xff},
 };
 
 
@@ -2320,7 +2318,26 @@ static kal_uint32 set_test_pattern_mode(kal_bool enable)
 	if (enable) {
 		// 0x5E00[8]: 1 enable,  0 disable
 		// 0x5E00[1:0]; 00 Color bar, 01 Random Data, 10 Square, 11 BLACK
-		write_cmos_sensor(0x0601, 0x01);
+
+				
+		write_cmos_sensor(0x0200, 0x0D);
+		write_cmos_sensor(0x0201, 0x78);
+		write_cmos_sensor(0x0202, 0x04);
+		write_cmos_sensor(0x0203, 0xE2);
+		write_cmos_sensor(0x0204, 0x00);
+		write_cmos_sensor(0x0205, 0x20);
+		
+		write_cmos_sensor(0x020E, 0x01);
+		write_cmos_sensor(0x020F, 0x00);
+		write_cmos_sensor(0x0210, 0x01);
+		write_cmos_sensor(0x0211, 0x00);
+		write_cmos_sensor(0x0212, 0x01);
+		write_cmos_sensor(0x0213, 0x00);
+		write_cmos_sensor(0x0214, 0x01);
+		write_cmos_sensor(0x0215, 0x00);
+		
+		write_cmos_sensor(0x3400, 0x01);
+		write_cmos_sensor(0x0601, 0x02);
 	} else {
 		// 0x5E00[8]: 1 enable,  0 disable
 		// 0x5E00[1:0]; 00 Color bar, 01 Random Data, 10 Square, 11 BLACK

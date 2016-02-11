@@ -746,9 +746,9 @@ typedef enum _ENUM_CMD_ID_T {
     CMD_ID_SET_PSCN_ADD_SW_BSSID = 0x46,      /* 0x46 (Set) */
     CMD_ID_SET_PSCN_MAC_ADDR = 0x47,    /* 0x47 (Set) */
     CMD_ID_GET_GSCN_SCN_RESULT = 0x48,    /* 0x48 (Get) */
-    CMD_ID_SET_BATCH_REQ = 49,
-
-
+    CMD_ID_SET_BATCH_REQ = 0x49,
+    CMD_ID_SET_COUNTRY_POWER_LIMIT = 0x4A,  /* 0x4A (Set) */
+	CMD_ID_SEND_DEAUTH = 0x4C,				/* 0x4C (Set) */
 
     CMD_ID_GET_NIC_CAPABILITY = 0x80,   /* 0x80 (Query) */
     CMD_ID_GET_LINK_QUALITY,            /* 0x81 (Query) */
@@ -1320,7 +1320,32 @@ typedef struct _CMD_SET_DOMAIN_INFO_T {
     UINT_8              aucReserved[2];
 } CMD_SET_DOMAIN_INFO_T, *P_CMD_SET_DOMAIN_INFO_T;
 
-// CMD_SET_IP_ADDRESS
+#if CFG_SUPPORT_PWR_LIMIT_COUNTRY
+
+// CMD_SET_PWR_LIMIT_TABLE
+typedef struct _CMD_CHANNEL_POWER_LIMIT {
+    UINT_8                 ucCentralCh;
+	INT_8                  cPwrLimitCCK;
+    INT_8                  cPwrLimit20;
+    INT_8                  cPwrLimit40;
+    INT_8                  cPwrLimit80;
+    INT_8                  cPwrLimit160;
+    UINT_8                 ucFlag;
+    UINT_8                 aucReserved[1];
+}CMD_CHANNEL_POWER_LIMIT, *P_CMD_CHANNEL_POWER_LIMIT;
+
+
+typedef struct _CMD_SET_COUNTRY_CHANNEL_POWER_LIMIT_T {
+    UINT_16                    u2CountryCode;
+    UINT_8                     ucCountryFlag;
+    UINT_8                     ucNum;
+    UINT_8                     aucReserved[4];
+    CMD_CHANNEL_POWER_LIMIT    rChannelPowerLimit[1];	
+} CMD_SET_COUNTRY_CHANNEL_POWER_LIMIT_T, *P_CMD_SET_COUNTRY_CHANNEL_POWER_LIMIT_T;
+
+#endif
+
+/* CMD_SET_IP_ADDRESS */
 typedef struct _IPV4_NETWORK_ADDRESS {
     UINT_8 aucIpAddr[4];
 } IPV4_NETWORK_ADDRESS, *P_IPV4_NETWORK_ADDRESS;

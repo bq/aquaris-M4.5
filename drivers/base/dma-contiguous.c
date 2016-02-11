@@ -397,7 +397,9 @@ struct cma {
 	unsigned long	base_pfn;
 	unsigned long	count;
 	unsigned long	*bitmap;
+
 	unsigned long	end_pfn;
+	phys_addr_t		base;
 };
 
 struct cma *dma_contiguous_default_area;
@@ -406,6 +408,21 @@ struct cma *dma_contiguous_default_area;
 #define CMA_SIZE_MBYTES CONFIG_CMA_SIZE_MBYTES
 #else
 #define CMA_SIZE_MBYTES 0
+#endif
+
+#ifdef TRUSTONIC_TEE_CONFIG
+extern int secmem_api_enable(u32 start, u32 size);
+extern int secmem_api_disable(void);
+extern int secmem_api_query(u32 *allocate_size);
+#else
+static inline int secmem_api_enable(u32 start, u32 size) {return 0;}
+static inline int secmem_api_disable(void) {return 0;}
+static inline int secmem_api_query(u32 *allocate_size) {return 0;}
+#endif
+
+#if defined (CONFIG_MTK_AEE_FEATURE) && defined (CONFIG_MT_ENG_BUILD)
+#include <linux/aee.h>
+#include <linux/disp_assert_layer.h>
 #endif
 
 /*
@@ -675,6 +692,7 @@ int __init dma_contiguous_reserve_area(phys_addr_t size, phys_addr_t base,
 	cma->base_pfn = PFN_DOWN(base);
 	cma->count = size >> PAGE_SHIFT;
 	cma->end_pfn = cma->base_pfn + cma->count;
+	cma->base = base;
 	*res_cma = cma;
 	cma_area_count++;
 
@@ -824,6 +842,71 @@ struct page *dma_alloc_from_contiguous(struct device *dev, int count,
 	return page;
 }
 
+struct page *dma_alloc_from_contiguous_start(struct device *dev,
+				unsigned long start, int count, unsigned int align)
+{
+	unsigned long mask, pfn, pageno;
+	struct cma *cma = dev_get_cma_area(dev);
+	struct page *page = NULL;
+	int ret;
+
+	if (!cma || !cma->count)
+		return NULL;
+
+	if (align > CONFIG_CMA_ALIGNMENT)
+		align = CONFIG_CMA_ALIGNMENT;
+
+	pr_debug("%s(cma %p, start %lu, count %d, align %d)\n", 
+		__func__, (void *)cma, start, count, align);
+
+	if (!count)
+		return NULL;
+
+	mask = (1 << align) - 1;
+
+	mutex_lock(&cma_mutex);
+
+	for (;;) {
+		pageno = bitmap_find_next_zero_area(cma->bitmap, cma->count,
+						    start, count, mask);
+		if (pageno >= cma->count) { pr_alert("%s %d: %lu %lu\n", __func__, __LINE__, mask, pageno);
+			break; }
+
+		pfn = cma->base_pfn + pageno;
+
+		adjust_forbid_cma_alloc_flag(1);
+
+// SVP 16
+//		ret = alloc_contig_range(pfn, pfn + count, MIGRATE_CMA, 0);
+		ret = alloc_contig_range(pfn, pfn + count, MIGRATE_MOVABLE, 0);
+
+		if (ret == 0) {
+			bitmap_set(cma->bitmap, pageno, count);
+			page = pfn_to_page(pfn);
+
+			adjust_forbid_cma_alloc_flag(0);
+
+			break;
+		} else if (ret != -EBUSY) {
+
+			adjust_forbid_cma_alloc_flag(0);
+
+			pr_alert("%s %d: %d\n", __func__, __LINE__, ret);
+			break;
+		}
+
+		adjust_forbid_cma_alloc_flag(0);
+
+		pr_debug("%s %d(): memory range at %p is busy, abort\n",
+			 __func__, __LINE__, pfn_to_page(pfn));
+		break;
+	}
+
+	mutex_unlock(&cma_mutex);
+	pr_debug("%s(): returned %p\n", __func__, page);
+	return page;
+}
+
 /**
  * dma_release_from_contiguous() - release allocated pages
  * @dev:   Pointer to device for which the pages were allocated.
@@ -873,10 +956,17 @@ bool dma_release_from_contiguous(struct device *dev, struct page *pages,
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/fs.h>
+#include <linux/proc_fs.h>
 #include <linux/miscdevice.h>
 #include <linux/dma-mapping.h>
 #include <asm/uaccess.h>
 #include <linux/sh_svp.h>
+
+enum ssvp_subtype {
+	SSVP_SUB_SVP,
+	SSVP_SUB_TUI,
+	__MAX_NR_SSVPSUBS,
+};
 
 #define SVP_STATE_NULL		0x00
 #define SVP_STATE_ONING_WAIT	0x01
@@ -885,91 +975,243 @@ bool dma_release_from_contiguous(struct device *dev, struct page *pages,
 #define SVP_STATE_OFFING	0x04
 #define SVP_STATE_OFF		0x05
 
-#define _SVP_MBSIZE_ CONFIG_MTK_SVP_RAM_SIZE
+#define _SSVP_MBSIZE_ CONFIG_MTK_SVP_RAM_SIZE
 
 static int ires;
 static struct device *cma_dev;
-static char _svp_state;
-static struct page *_page;
+//static char _svp_state;
+//static struct page *_page;
 static int _svp_onlinewait_tries;
 static struct task_struct *_svp_online_task = NULL;
 
+struct SSVP_Region
+{
+	char state;
+	unsigned long start;
+	unsigned long count;
+	struct page * page;
+};
+
 struct cma *svp_contiguous_default_area;
+
+static struct SSVP_Region _svpregs[__MAX_NR_SSVPSUBS];
+
+#define _SVP_MBSIZE (CONFIG_MTK_SVP_RAM_SIZE - CONFIG_MTK_TUI_RAM_SIZE)
+
+#define _TUI_MBSIZE CONFIG_MTK_TUI_RAM_SIZE
+
+int tui_region_offline(phys_addr_t *pa, unsigned long *size)
+{
+	struct page *page;
+	int retval = 0;
+
+	pr_alert("%s %d: tui to offline enter state: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_TUI].state);
+
+	if (_svpregs[SSVP_SUB_TUI].state == SVP_STATE_ON) {
+		_svpregs[SSVP_SUB_TUI].state = SVP_STATE_OFFING;
+
+		page = dma_alloc_from_contiguous_start(cma_dev, _svpregs[SSVP_SUB_TUI].start, _svpregs[SSVP_SUB_TUI].count, 0);
+
+		if (page) {
+			_svpregs[SSVP_SUB_TUI].page = page;
+			_svpregs[SSVP_SUB_TUI].state = SVP_STATE_OFF;
+
+			if (pa) 
+				*pa = svp_contiguous_default_area->base + (_svpregs[SSVP_SUB_TUI].start << PAGE_SHIFT);
+			if (size)
+				*size = _svpregs[SSVP_SUB_TUI].count << PAGE_SHIFT;
+
+		} else {
+			_svpregs[SSVP_SUB_TUI].state = SVP_STATE_ON;
+			retval = -EAGAIN;
+		}
+	} else {
+		retval = -EBUSY;
+	}
+
+	pr_alert("%s %d: tui to offline leave state: %d, retval: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_TUI].state, retval);
+
+	return retval;
+}
+EXPORT_SYMBOL(tui_region_offline);
+
+int tui_region_online(void)
+{
+	int retval = 0;
+	bool retb;
+
+	pr_alert("%s %d: tui to online enter state: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_TUI].state);
+
+	if (_svpregs[SSVP_SUB_TUI].state == SVP_STATE_OFF) {
+		_svpregs[SSVP_SUB_TUI].state = SVP_STATE_ONING_WAIT;
+
+		retb = dma_release_from_contiguous(cma_dev, _svpregs[SSVP_SUB_TUI].page, _svpregs[SSVP_SUB_TUI].count);
+
+		if (retb == true) {
+			_svpregs[SSVP_SUB_TUI].page = NULL;
+			_svpregs[SSVP_SUB_TUI].state = SVP_STATE_ON;
+		}
+	} else {
+		retval = -EBUSY;
+	}
+
+	pr_alert("%s %d: tui to online leave state: %d, retval: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_TUI].state, retval);
+
+	return retval;
+}
+EXPORT_SYMBOL(tui_region_online);
+
+static ssize_t
+tui_cma_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
+{
+	pr_alert("%s %d: tui state: %d ires: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_TUI].state, ires);
+
+	return 0;
+}  
+  
+static ssize_t
+tui_cma_write(struct file *file, const char __user *buf, size_t count, loff_t *ppos)
+{
+	unsigned char val;
+	int retval = count;
+
+	pr_alert("%s %d: count: %zu\n", __func__, __LINE__, count);
+
+	if (count >= 2) {
+		if (copy_from_user(&val, &buf[0], 1)) {
+			retval = -EFAULT;
+			goto out;
+		}
+
+		if (count == 2 && val == '0') {
+			tui_region_offline(NULL, NULL);
+		}
+		else {
+			tui_region_online();
+		}
+	}
+
+out:
+	return retval;
+}
+
+static const struct file_operations tui_cma_fops = {
+	.owner =    THIS_MODULE,
+	.read  =    tui_cma_read,
+	.write =    tui_cma_write,
+};
 
 static int __svp_region_online(void)
 {
 	int retval = 0;
 	bool retb;
 
-	//_dev_info(cma_dev, "%s %d: svp to online enter state: %d\n", __func__, __LINE__, _svp_state);
-	pr_alert("%s %d: svp to online enter state: %d\n", __func__, __LINE__, _svp_state);
+	pr_alert("%s %d: svp to online enter state: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_SVP].state);
 
-	if (_svp_state == SVP_STATE_ONING_WAIT) {
-		_svp_state = SVP_STATE_ONING;
+	if (_svpregs[SSVP_SUB_SVP].state == SVP_STATE_ONING_WAIT) {
+		_svpregs[SSVP_SUB_SVP].state = SVP_STATE_ONING;
 
-		retb = dma_release_from_contiguous(cma_dev, _page, svp_contiguous_default_area->count);
+		retb = dma_release_from_contiguous(cma_dev, _svpregs[SSVP_SUB_SVP].page, _svpregs[SSVP_SUB_SVP].count);
 
 		if (retb == true) {
-			_page = 0;
-			_svp_state = SVP_STATE_ON;
+			_svpregs[SSVP_SUB_SVP].page = NULL;
+			_svpregs[SSVP_SUB_SVP].state = SVP_STATE_ON;
 		}
 	} else {
 		retval = -EBUSY;
 	}
 
-	//_dev_info(cma_dev, "%s %d: svp to online leave state: %d, retval: %d\n", __func__, __LINE__, _svp_state, retval);
-	pr_alert("%s %d: svp to online leave state: %d, retval: %d\n", __func__, __LINE__, _svp_state, retval);
+	pr_alert("%s %d: svp to online leave state: %d, retval: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_SVP].state, retval);
 
 	return retval;
 }
 
 static int _svp_online_kthread_func(void *data)
 {
-	int secusage = 0;
+	u32 secusage = 0;
 	int secdisable = 0;
+	int vret;
 
 	pr_alert("%s %d: start\n", __func__, __LINE__);
 
 	_svp_onlinewait_tries = 0;
 
-	while (_svp_onlinewait_tries < 10) {
+	while (_svp_onlinewait_tries < 30) {
 		msleep(100);
 		secusage = 0;
 
 		// call secmem_query
+		vret = secmem_api_query(&secusage);
 
 		_svp_onlinewait_tries++;
-		pr_alert("%s %d: _svp_onlinewait_tries: %d, secusage: %d\n", __func__, __LINE__, _svp_onlinewait_tries, secusage);
+		pr_alert("%s %d: vret: %d, _svp_onlinewait_tries: %d, secusage: %d\n", __func__, __LINE__, vret, _svp_onlinewait_tries, secusage);
 
 		// for no TEE test
+		/*
 		if (_svp_onlinewait_tries < 1) {
 			secusage = 10;
-		}
+		}*/
 
 		if (!secusage) {
 			break;
 		}
 	}
 
-	if (_svp_onlinewait_tries >= 10) {
+	if (_svp_onlinewait_tries >= 30) {
 		// to do, show error
 		pr_alert("%s %d: _svp_onlinewait_tries: %d, secusage: %d\n", __func__, __LINE__, _svp_onlinewait_tries, secusage);
 
-		_svp_state = SVP_STATE_OFF;
+		_svpregs[SSVP_SUB_SVP].state = SVP_STATE_OFF;
+
+#if defined (CONFIG_MTK_AEE_FEATURE) && defined (CONFIG_MT_ENG_BUILD)
+		{
+			#define MSG_SIZE_TO_AEE 70
+			char msg_to_aee[MSG_SIZE_TO_AEE];
+			pr_alert("Shareable SVP trigger kernel warning, vret: %d, secusage: %d\n", vret, secusage);
+
+			snprintf(msg_to_aee, MSG_SIZE_TO_AEE, "please contact SS memory module owner\n");
+			aee_kernel_warning_api("SVP", 0, DB_OPT_DEFAULT|DB_OPT_DUMPSYS_ACTIVITY|DB_OPT_LOW_MEMORY_KILLER
+                        		| DB_OPT_PID_MEMORY_INFO /*for smaps and hprof*/
+                        		| DB_OPT_PROCESS_COREDUMP
+                        		| DB_OPT_DUMPSYS_SURFACEFLINGER
+                        		| DB_OPT_DUMPSYS_GFXINFO
+                        		| DB_OPT_DUMPSYS_PROCSTATS,
+                                "SVP release Failed\nCRDISPATCH_KEY:SVP_SS1", msg_to_aee);
+		}
+#endif
+
 		goto out;
 	}
 
 	// call secmem_disable
+	secdisable = secmem_api_disable();
 
 	pr_alert("%s %d: _svp_onlinewait_tries: %d, secusage: %d, secdisable %d\n", __func__, __LINE__, _svp_onlinewait_tries, secusage, secdisable);
 
 	if (!secdisable) {
 		__svp_region_online();
 
-		_svp_state = SVP_STATE_ON;
+		_svpregs[SSVP_SUB_SVP].state = SVP_STATE_ON;
 	} else { // to do, error handle
 
-		_svp_state = SVP_STATE_OFF;
+		_svpregs[SSVP_SUB_SVP].state = SVP_STATE_OFF;
+
+#if defined (CONFIG_MTK_AEE_FEATURE) && defined (CONFIG_MT_ENG_BUILD)
+		{
+			#define MSG_SIZE_TO_AEE 70
+			char msg_to_aee[MSG_SIZE_TO_AEE];
+			pr_alert("Shareable SVP trigger kernel warning, secdisable %d\n", secdisable);
+
+			snprintf(msg_to_aee, MSG_SIZE_TO_AEE, "please contact SS memory module owner\n");
+			aee_kernel_warning_api("SVP", 0, DB_OPT_DEFAULT|DB_OPT_DUMPSYS_ACTIVITY|DB_OPT_LOW_MEMORY_KILLER
+                        		| DB_OPT_PID_MEMORY_INFO /*for smaps and hprof*/
+                        		| DB_OPT_PROCESS_COREDUMP
+                        		| DB_OPT_DUMPSYS_SURFACEFLINGER
+                        		| DB_OPT_DUMPSYS_GFXINFO
+                        		| DB_OPT_DUMPSYS_PROCSTATS,
+                                "SVP release Failed\nCRDISPATCH_KEY:SVP_SS1", msg_to_aee);
+		}
+#endif
 	}
 
 out:
@@ -1013,7 +1255,7 @@ static int __svp_migrate_range(unsigned long start, unsigned long end)
  */
 void __init svp_contiguous_reserve(phys_addr_t limit)
 {
-	phys_addr_t selected_size = _SVP_MBSIZE_ * 1024 * 1024;
+	phys_addr_t selected_size = _SSVP_MBSIZE_ * 1024 * 1024;
 
 	pr_alert("%s(limit %08lx)\n", __func__, (unsigned long)limit);
 
@@ -1076,47 +1318,53 @@ int svp_is_in_range(unsigned long pfn)
 	return 0;
 }
 
-int svp_region_offline(void)
+int svp_region_offline(phys_addr_t *pa, unsigned long *size)
 {
 	struct page *page;
 	int retval = 0;
+	int res = 0;
 
-	//_dev_info(cma_dev, "%s %d: svp to offline enter state: %d\n", __func__, __LINE__, _svp_state);
-	pr_alert("%s %d: svp to offline enter state: %d\n", __func__, __LINE__, _svp_state);
+	pr_alert("%s %d: svp to offline enter state: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_SVP].state);
 
-	if (_svp_state == SVP_STATE_ON) {
-		_svp_state = SVP_STATE_OFFING;
+	if (_svpregs[SSVP_SUB_SVP].state == SVP_STATE_ON) {
+		_svpregs[SSVP_SUB_SVP].state = SVP_STATE_OFFING;
 
-		page = dma_alloc_from_contiguous(cma_dev, svp_contiguous_default_area->count, 0);
+		page = dma_alloc_from_contiguous_start(cma_dev, _svpregs[SSVP_SUB_SVP].start, _svpregs[SSVP_SUB_SVP].count, 0);
 
 		if (page) {
-			_page = page;
-			_svp_state = SVP_STATE_OFF;
+			_svpregs[SSVP_SUB_SVP].page = page;
+			_svpregs[SSVP_SUB_SVP].state = SVP_STATE_OFF;
 
 			// call secmem_enable
+			res = secmem_api_enable(svp_contiguous_default_area->base + (_svpregs[SSVP_SUB_SVP].start << PAGE_SHIFT), _svpregs[SSVP_SUB_SVP].count << PAGE_SHIFT);
+			if (pa) 
+				*pa = svp_contiguous_default_area->base + (_svpregs[SSVP_SUB_SVP].start << PAGE_SHIFT);
+			if (size)
+				*size = _svpregs[SSVP_SUB_SVP].count << PAGE_SHIFT;
+
+			pr_alert("%s %d: secmem_enable, res %d\n", __func__, __LINE__, res);
 		} else {
-			_svp_state = SVP_STATE_ON;
+			_svpregs[SSVP_SUB_SVP].state = SVP_STATE_ON;
 			retval = -EAGAIN;
 		}
 	} else {
 		retval = -EBUSY;
 	}
 
-	//_dev_info(cma_dev, "%s %d: svp to offline leave state: %d, retval: %d\n", __func__, __LINE__, _svp_state, retval);
-	pr_alert("%s %d: svp to offline leave state: %d, retval: %d\n", __func__, __LINE__, _svp_state, retval);
+	pr_alert("%s %d: svp to offline leave state: %d, retval: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_SVP].state, retval);
 
 	return retval;
 }
+EXPORT_SYMBOL(svp_region_offline);
 
 int svp_region_online(void)
 {
 	int retval = 0;
 
-	//_dev_info(cma_dev, "%s %d: svp to online enter state: %d\n", __func__, __LINE__, _svp_state);
-	pr_alert("%s %d: svp to online enter state: %d\n", __func__, __LINE__, _svp_state);
+	pr_alert("%s %d: svp to online enter state: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_SVP].state);
 
-	if (_svp_state == SVP_STATE_OFF) {
-		_svp_state = SVP_STATE_ONING_WAIT;
+	if (_svpregs[SSVP_SUB_SVP].state == SVP_STATE_OFF) {
+		_svpregs[SSVP_SUB_SVP].state = SVP_STATE_ONING_WAIT;
 
 		_svp_online_task = kthread_create(_svp_online_kthread_func, NULL, "svp_online_kthread");
 		wake_up_process(_svp_online_task);
@@ -1124,11 +1372,11 @@ int svp_region_online(void)
 		retval = -EBUSY;
 	}
 
-	//_dev_info(cma_dev, "%s %d: svp to online leave state: %d, retval: %d\n", __func__, __LINE__, _svp_state, retval);
-	pr_alert("%s %d: svp to online leave state: %d, retval: %d\n", __func__, __LINE__, _svp_state, retval);
+	pr_alert("%s %d: svp to online leave state: %d, retval: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_SVP].state, retval);
 
 	return retval;
 }
+EXPORT_SYMBOL(svp_region_online);
 
 /* any read request will free coherent memory, eg.
  * cat /dev/svp_region
@@ -1136,17 +1384,14 @@ int svp_region_online(void)
 static ssize_t
 svp_cma_read(struct file *file, char __user *buf, size_t count, loff_t *ppos)
 {
-	//_dev_info(cma_dev, "svp cma state: %d\n", _svp_state);
-	pr_alert("%s %d:svp state: %d ires: %d\n", __func__, __LINE__, _svp_state, ires);
+	pr_alert("%s %d:svp state: %d ires: %d\n", __func__, __LINE__, _svpregs[SSVP_SUB_SVP].state, ires);
 
 	if (svp_contiguous_default_area)
 	{
-		//_dev_info(cma_dev, "svp cma base_pfn: %ld, count %ld\n", svp_contiguous_default_area->base_pfn, svp_contiguous_default_area->count);
 		pr_alert("%s %d: svp cma base_pfn: %ld, count %ld\n", __func__, __LINE__, svp_contiguous_default_area->base_pfn, svp_contiguous_default_area->count);
 	}
 	if (dma_contiguous_default_area)
 	{
-		//_dev_info(cma_dev, "dma cma base_pfn: %ld, count %ld\n", dma_contiguous_default_area->base_pfn, dma_contiguous_default_area->count);
 		pr_alert("%s %d: dma cma base_pfn: %ld, count %ld\n", __func__, __LINE__, dma_contiguous_default_area->base_pfn, dma_contiguous_default_area->count);
 	}
 
@@ -1172,32 +1417,77 @@ svp_cma_write(struct file *file, const char __user *buf, size_t count, loff_t *p
 		}
 
 		if (count == 2 && val == '0') {
-			svp_region_offline();
+			svp_region_offline(NULL, NULL);
 		}
-		else
-		{
+		else {
 			svp_region_online();
 		}
 	}
 
 out:
 	return retval;
-}  
-  
-static const struct file_operations svp_cma_fops = {  
-    .owner =    THIS_MODULE,  
-    .read  =    svp_cma_read,
-    .write =    svp_cma_write,  
-};  
-  
-static struct miscdevice svp_cma_misc = {  
-    .name = "svp_region",
-    .fops = &svp_cma_fops,
-};  
-  
-static int __init svp_cma_init(void)
-{  
+}
+
+static long svp_cma_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
 	int ret = 0;
+
+	pr_alert("%s %d: cmd: %x\n", __func__, __LINE__, cmd);
+
+	switch (cmd) {
+	case SVP_REGION_IOC_ONLINE: {
+		svp_region_online();
+		break;
+	}
+	case SVP_REGION_IOC_OFFLINE: {
+		svp_region_offline(NULL, NULL);
+		break;
+	}
+	default: {
+		//IONMSG("ion_ioctl : No such command!! 0x%x\n", cmd);
+		return -ENOTTY;
+	}
+	}
+
+	return ret;
+}
+
+#if IS_ENABLED(CONFIG_COMPAT)
+static long svp_cma_COMPAT_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+	pr_alert("%s %d: cmd: %x\n", __func__, __LINE__, cmd);
+
+	if (!filp->f_op || !filp->f_op->unlocked_ioctl)
+		return -ENOTTY;
+
+	return filp->f_op->unlocked_ioctl(filp, cmd,
+							(unsigned long)compat_ptr(arg));
+}
+
+#else
+
+#define svp_cma_COMPAT_ioctl  NULL
+
+#endif
+
+static const struct file_operations svp_cma_fops = {
+	.owner =    THIS_MODULE,
+	.read  =    svp_cma_read,
+	.write =    svp_cma_write,
+	.unlocked_ioctl = svp_cma_ioctl,
+	.compat_ioctl   = svp_cma_COMPAT_ioctl,
+};
+
+static struct miscdevice svp_cma_misc = {
+	.minor = MISC_DYNAMIC_MINOR,
+	.name = "svp_region",
+	.fops = &svp_cma_fops,
+};
+
+static int __init svp_cma_init(void)
+{
+	int ret = 0;
+	unsigned long start = 0;
 
 	ret = misc_register(&svp_cma_misc);
 	if (unlikely(ret)) {
@@ -1207,13 +1497,31 @@ static int __init svp_cma_init(void)
 	cma_dev = svp_cma_misc.this_device;
 	cma_dev->coherent_dma_mask = ~0;
 
-	_svp_state = SVP_STATE_ON;
 	dev_set_cma_area(cma_dev, svp_contiguous_default_area);
 
-	_dev_info(cma_dev, "registered.\n");  
+	_dev_info(cma_dev, "registered.\n");
 
-	return ret;  
-}  
+	proc_create("svp_region", 0, NULL, &svp_cma_fops);
+
+	if (_SVP_MBSIZE > 0) {
+		_svpregs[SSVP_SUB_SVP].count = (_SVP_MBSIZE * SZ_1M) >> PAGE_SHIFT;
+		_svpregs[SSVP_SUB_SVP].start = 0;
+		_svpregs[SSVP_SUB_SVP].state = SVP_STATE_ON;
+		start = _svpregs[SSVP_SUB_SVP].start + _svpregs[SSVP_SUB_SVP].count;
+	}
+	pr_alert("%s %d: svp region start: %lu, count %lu\n", __func__, __LINE__, _svpregs[SSVP_SUB_SVP].start, _svpregs[SSVP_SUB_SVP].count);
+
+	proc_create("tui_region", 0, NULL, &tui_cma_fops);
+
+	if (_TUI_MBSIZE > 0) {
+		_svpregs[SSVP_SUB_TUI].count = (_TUI_MBSIZE * SZ_1M) >> PAGE_SHIFT;
+		_svpregs[SSVP_SUB_TUI].start = start;
+		_svpregs[SSVP_SUB_TUI].state = SVP_STATE_ON;
+	}
+	pr_alert("%s %d: tui region start: %lu, count %lu\n", __func__, __LINE__, _svpregs[SSVP_SUB_TUI].start, _svpregs[SSVP_SUB_TUI].count);
+
+	return ret;
+}
 module_init(svp_cma_init);
  
 static void __exit svp_cma_exit(void)

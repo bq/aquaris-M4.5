@@ -487,35 +487,62 @@ mtk_cfg80211_get_station(struct wiphy *wiphy,
 			MAC2STR(mac), MAC2STR(arBssid)));
 		return -ENOENT;
 	}
+	
+    /* 2. fill TX rate */
+    if (prGlueInfo->eParamMediaStateIndicated != PARAM_MEDIA_STATE_CONNECTED) {
+        /* not connected */
+        DBGLOG(REQ, WARN, ("not yet connected\n"));
+    } else {
+        rStatus = kalIoctl(prGlueInfo,
+            wlanoidQueryLinkSpeed,
+            &u4Rate,
+            sizeof(u4Rate),
+            TRUE,
+            FALSE,
+            FALSE,
+            &u4BufLen);
 
-	/* 2. fill TX rate */
-	rStatus = kalIoctl(prGlueInfo,
-			   wlanoidQueryLinkSpeed,
-			   &u4Rate, sizeof(u4Rate), TRUE, FALSE, FALSE, &u4BufLen);
+        sinfo->filled |= STATION_INFO_TX_BITRATE;
 
-	if (rStatus != WLAN_STATUS_SUCCESS) {
-		DBGLOG(REQ, WARN, ("unable to retrieve link speed\n"));
-	} else {
-		sinfo->filled |= STATION_INFO_TX_BITRATE;
-		sinfo->txrate.legacy = u4Rate / 1000;	/* convert from 100bps to 100kbps */
-	}
+        if ((rStatus != WLAN_STATUS_SUCCESS) || (u4Rate == 0)) {
+            /*
+            DBGLOG(REQ, WARN, ("unable to retrieve link speed\n"));
+            */
+            DBGLOG(REQ, WARN, ("last link speed\n"));
+            sinfo->txrate.legacy = prGlueInfo->u4LinkSpeedCache;
+        }  else {
+            /*
+            sinfo->filled |= STATION_INFO_TX_BITRATE;
+            */
+            sinfo->txrate.legacy = u4Rate / 1000; /* convert from 100bps to 100kbps */
+            prGlueInfo->u4LinkSpeedCache = u4Rate / 1000;
+        }
+    }
 
-	if (prGlueInfo->eParamMediaStateIndicated != PARAM_MEDIA_STATE_CONNECTED) {
-		/* not connected */
-		DBGLOG(REQ, WARN, ("not yet connected\n"));
-	} else {
-		/* 3. fill RSSI */
-		rStatus = kalIoctl(prGlueInfo,
-				   wlanoidQueryRssi,
-				   &i4Rssi, sizeof(i4Rssi), TRUE, FALSE, FALSE, &u4BufLen);
+    /* 3. fill RSSI */
+    if (prGlueInfo->eParamMediaStateIndicated != PARAM_MEDIA_STATE_CONNECTED) {
+        /* not connected */
+        DBGLOG(REQ, WARN, ("not yet connected\n"));
+    } else {
+        rStatus = kalIoctl(prGlueInfo,
+            wlanoidQueryRssi,
+            &i4Rssi,
+            sizeof(i4Rssi),
+            TRUE,
+            FALSE,
+            FALSE,
+            &u4BufLen);
 
-		if (rStatus != WLAN_STATUS_SUCCESS) {
-			DBGLOG(REQ, WARN, ("unable to retrieve link speed\n"));
-		} else {
-			sinfo->filled |= STATION_INFO_SIGNAL;
-			sinfo->signal = i4Rssi;	/* dBm */
-		}
-	}
+        sinfo->filled |= STATION_INFO_SIGNAL;
+
+        if ((rStatus != WLAN_STATUS_SUCCESS) || (i4Rssi == PARAM_WHQL_RSSI_MIN_DBM) || (i4Rssi == PARAM_WHQL_RSSI_MAX_DBM)) {
+            DBGLOG(REQ, WARN, ("last rssi\n"));
+            sinfo->signal = prGlueInfo->i4RssiCache;
+        } else {
+            sinfo->signal = i4Rssi; /* dBm */
+            prGlueInfo->i4RssiCache = i4Rssi;
+        }
+    }
 
 	/* Get statistics from net_dev */
 	prDevStats = (struct net_device_stats *)kalGetStats(ndev);

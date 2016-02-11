@@ -1325,6 +1325,10 @@ struct _ADAPTER_T {
     BOOLEAN fgIsEfuseValid;
     BOOLEAN fgIsEmbbededMacAddrValid;
 
+#if CFG_SUPPORT_PWR_LIMIT_COUNTRY 
+    BOOLEAN fgIsPowerLimitTableValid;
+#endif
+
     /* Packet Forwarding Tracking */
     INT_32  i4PendingFwdFrameCount;
 
@@ -1358,7 +1362,7 @@ struct _ADAPTER_T {
 #if CFG_SUPPORT_DBG_POWERMODE
 	BOOLEAN		fgEnDbgPowerMode;	/*  dbg priviledge power mode, always keep in active */
 #endif
-
+	atomic_t	fgIsSuspended;
 };/* end of _ADAPTER_T */
 
 /*******************************************************************************

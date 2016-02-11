@@ -380,8 +380,6 @@ char cust_i2c_read_byte(unsigned char addr, unsigned char regaddr, unsigned char
 	#define PK_ERR(a,...)
 #endif
 
-
-
 /******************************************************************************
  * local variables
 ******************************************************************************/
@@ -778,6 +776,8 @@ int FL_Enable(void)
     return 0;
 }
 
+
+
 int FL_Disable(void)
 {
 	struct flash_chip_data *chip = &chipconf;
@@ -814,6 +814,8 @@ int FL_dim_duty(kal_uint32 duty)
 	PK_DBG("FL_dim_duty\n");
     return 0;
 }
+
+
 
 
 int FL_Init(void)
@@ -980,10 +982,14 @@ enum hrtimer_restart ledTimeOutCallback(struct hrtimer *timer)
 static struct hrtimer g_timeOutTimer;
 void timerInit(void)
 {
+	static int init_flag;
+	if (init_flag==0){
+		init_flag=1;
+  INIT_WORK(&workTimeOut, work_timeOutFunc);
 	g_timeOutTimeMs=1000; //1s
 	hrtimer_init( &g_timeOutTimer, CLOCK_MONOTONIC, HRTIMER_MODE_REL );
 	g_timeOutTimer.function=ledTimeOutCallback;
-
+}
 }
 
 

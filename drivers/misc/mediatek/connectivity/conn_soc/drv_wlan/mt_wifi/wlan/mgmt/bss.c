@@ -2103,6 +2103,41 @@ bssRemoveStaRecFromClientList (
 
     return;
 } /* end of bssRemoveStaRecFromClientList() */
+
+/*----------------------------------------------------------------------------*
+/
+/*!
+* @brief Get station record by Address for AP mode
+*
+* @param[in] prBssInfo              Pointer to BSS_INFO_T.
+* @param[in] pucMacAddr               Pointer to target mac address
+*
+* @return pointer of STA_RECORD_T if found, otherwise, return NULL
+*/
+/*----------------------------------------------------------------------------*/
+
+P_STA_RECORD_T bssGetClientByAddress(IN P_BSS_INFO_T prBssInfo, PUINT_8 pucMacAddr)
+{
+	P_LINK_T prStaRecOfClientList;
+
+	ASSERT(prBssInfo);
+	ASSERT(pucMacAddr);
+	
+	prStaRecOfClientList = &prBssInfo->rStaRecOfClientList;
+	if (!LINK_IS_EMPTY(prStaRecOfClientList)) {
+		P_STA_RECORD_T prCurrStaRec;
+
+		LINK_FOR_EACH_ENTRY(prCurrStaRec, prStaRecOfClientList, rLinkEntry, STA_RECORD_T) {
+			if (EQUAL_MAC_ADDR(prCurrStaRec->aucMacAddr, pucMacAddr)) {
+				DBGLOG(BSS, TRACE, ("found station record for mac %pM\n", pucMacAddr));
+				return prCurrStaRec;
+			}
+		}
+	}
+	DBGLOG(BSS, TRACE, ("not found station record for mac %pM\n", pucMacAddr));
+	return NULL;
+}
+
 #endif /* CFG_SUPPORT_ADHOC || CFG_SUPPORT_AAA */
 
 

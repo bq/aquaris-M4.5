@@ -2,7 +2,7 @@
 #define __SH_SVP_H__
 
 #if defined(CONFIG_CMA) && defined(CONFIG_MTK_SVP)
-int svp_region_offline(void);
+int svp_region_offline(phys_addr_t *pa, unsigned long *size);
 int svp_region_online(void);
 #else
 static inline int svp_region_offline(void) { return -ENOSYS; }

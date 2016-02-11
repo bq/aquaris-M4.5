@@ -190,4 +190,9 @@ static inline unsigned long cma_total_pages(unsigned long node_start_pfn,
 
 #endif
 
+#define SVP_REGION_IOC_MAGIC		'S'
+
+#define SVP_REGION_IOC_ONLINE		_IOR(SVP_REGION_IOC_MAGIC, 2, int)
+#define SVP_REGION_IOC_OFFLINE		_IOR(SVP_REGION_IOC_MAGIC, 4, int)
+
 #endif

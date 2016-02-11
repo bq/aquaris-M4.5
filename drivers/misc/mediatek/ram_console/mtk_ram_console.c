@@ -119,6 +119,7 @@ static int FIQ_log_size = sizeof(struct ram_console_buffer);
 static struct ram_console_buffer *ram_console_buffer;
 static struct ram_console_buffer *ram_console_old ;
 static struct ram_console_buffer *ram_console_buffer_pa;
+static int ram_console_init_done;
 
 static DEFINE_SPINLOCK(ram_console_lock);
 
@@ -393,7 +394,8 @@ static int ram_console_check_header(struct ram_console_buffer *buffer)
 {
 	int i;
 	if (!buffer || (buffer->sz_buffer != ram_console_buffer->sz_buffer) || buffer->off_pl > buffer->sz_buffer
-	    || buffer->off_lk > buffer->sz_buffer || buffer->off_linux > buffer->sz_buffer || buffer->off_console > buffer->sz_buffer) {
+	    || buffer->off_lk > buffer->sz_buffer || buffer->off_linux > buffer->sz_buffer || buffer->off_console > buffer->sz_buffer
+	    || buffer->off_pl + ALIGN(buffer->sz_pl, 64) != buffer->off_lpl || buffer->off_lk + ALIGN(buffer->sz_lk, 64) != buffer->off_llk) {
 		pr_err("ram_console: ilegal header.");
 		for (i = 0; i < 16; i++)
 			pr_debug("0x%x ", ((int*)buffer)[i]);
@@ -449,8 +451,9 @@ static int __init ram_console_save_old(struct ram_console_buffer *buffer, size_t
 static int __init ram_console_init(struct ram_console_buffer *buffer, size_t buffer_size)
 {
 	ram_console_buffer = buffer;
+	buffer->sz_buffer = buffer_size;
 
-	if (buffer->sig != REBOOT_REASON_SIG) {
+	if (buffer->sig != REBOOT_REASON_SIG  || ram_console_check_header(buffer)) {
 		memset((void*)buffer, 0, buffer_size);
 		buffer->sig = REBOOT_REASON_SIG;
 	}
@@ -459,14 +462,16 @@ static int __init ram_console_init(struct ram_console_buffer *buffer, size_t buf
 		buffer->off_linux = buffer->off_llk + ALIGN(buffer->sz_lk, 64);
 	else
 		buffer->off_linux = 512; /* OTA:leave enough space for pl/lk */
-	buffer->sz_buffer = buffer_size;
 	buffer->off_console = buffer->off_linux + ALIGN(sizeof(struct last_reboot_reason), 64);
 	buffer->sz_console = buffer->sz_buffer - buffer->off_console;
+	buffer->log_start = 0;
+	buffer->log_size = 0;
 	memset((void*)buffer + buffer->off_linux, 0, buffer_size - buffer->off_linux);
 //#ifndef CONFIG_PSTORE
 #if 1
 	register_console(&ram_console);
 #endif
+    ram_console_init_done = 1;
 	return 0;
 }
 
@@ -662,16 +667,22 @@ RESERVEDMEM_OF_DECLARE(reserve_memory_pstore, "pstore-reserve-memory", ram_conso
 
 void aee_rr_rec_reboot_mode(u8 mode)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(reboot_mode, mode);
 }
 
 void aee_rr_rec_kdump_params(void *params)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(kparams, params);
 }
 
 void aee_rr_rec_fiq_step(u8 step)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(fiq_step, step);
 }
 
@@ -682,6 +693,8 @@ int aee_rr_curr_fiq_step(void)
 
 void aee_rr_rec_exp_type(unsigned int type)
 {
+    if (!ram_console_init_done)
+        return;
 	if (LAST_RR_VAL(exp_type) == 0 && type < 16)
 		LAST_RR_SET(exp_type, 0xaeedead0 | type);
 }
@@ -695,6 +708,8 @@ unsigned int aee_rr_curr_exp_type(void)
 /* composite api */
 void aee_rr_rec_last_irq_enter(int cpu, int irq, u64 jiffies)
 {
+    if (!ram_console_init_done)
+        return;
 	if (cpu >= 0 && cpu < NR_CPUS) {
 		LAST_RR_SET_WITH_ID(last_irq_enter, cpu, irq);
 		LAST_RR_SET_WITH_ID(jiffies_last_irq_enter, cpu, jiffies);
@@ -704,6 +719,8 @@ void aee_rr_rec_last_irq_enter(int cpu, int irq, u64 jiffies)
 
 void aee_rr_rec_last_irq_exit(int cpu, int irq, u64 jiffies)
 {
+    if (!ram_console_init_done)
+        return;
 	if (cpu >=0 && cpu < NR_CPUS) {
 		LAST_RR_SET_WITH_ID(last_irq_exit, cpu, irq);
 		LAST_RR_SET_WITH_ID(jiffies_last_irq_exit, cpu, jiffies);
@@ -713,6 +730,8 @@ void aee_rr_rec_last_irq_exit(int cpu, int irq, u64 jiffies)
 
 void aee_rr_rec_last_sched_jiffies(int cpu, u64 jiffies, const char *comm)
 {
+    if (!ram_console_init_done)
+        return;
 	if (cpu >=0 && cpu < NR_CPUS) {
 		LAST_RR_SET_WITH_ID(jiffies_last_sched, cpu, jiffies);
 		LAST_RR_MEMCPY_WITH_ID(last_sched_comm, cpu, comm, TASK_COMM_LEN);
@@ -722,6 +741,8 @@ void aee_rr_rec_last_sched_jiffies(int cpu, u64 jiffies, const char *comm)
 
 void aee_rr_rec_hoplug(int cpu, u8 data1, u8 data2)
 {
+    if (!ram_console_init_done)
+        return;
 	if (cpu >=0 && cpu < NR_CPUS) {
 		LAST_RR_SET_WITH_ID(hotplug_data1, cpu, data1);
 		if (cpu == 0)
@@ -731,6 +752,8 @@ void aee_rr_rec_hoplug(int cpu, u8 data1, u8 data2)
 
 void aee_rr_rec_hotplug(int cpu, u8 data1, u8 data2, unsigned long data3)
 {
+    if (!ram_console_init_done)
+        return;
 	if (cpu >=0 && cpu < NR_CPUS) {
 		LAST_RR_SET_WITH_ID(hotplug_data1, cpu, data1);
 		if (cpu == 0) {
@@ -747,6 +770,8 @@ void aee_rr_rec_clk(int id, u32 val)
 
 void aee_rr_rec_deepidle_val(u32 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(deepidle_data, val);
 }
 
@@ -757,6 +782,8 @@ u32 aee_rr_curr_deepidle_val(void)
 
 void aee_rr_rec_mcdi_wfi_val(u32 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(mcdi_wfi, val);
 }
 
@@ -767,11 +794,15 @@ u32 aee_rr_curr_mcdi_wfi_val(void)
 
 void aee_rr_rec_mcdi_r15_val(u32 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(mcdi_r15, val);
 }
 
 void aee_rr_rec_sodi_val(u32 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(sodi_data, val);
 }
 
@@ -782,6 +813,8 @@ u32 aee_rr_curr_sodi_val(void)
 
 void aee_rr_rec_spm_suspend_val(u32 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(spm_suspend_data, val);
 }
 
@@ -819,16 +852,22 @@ unsigned long *aee_rr_rec_cpu_dormant_pa(void)
 
 void aee_rr_rec_cpu_dvfs_vproc_big(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(cpu_dvfs_vproc_big, val);
 }
 
 void aee_rr_rec_cpu_dvfs_vproc_little(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(cpu_dvfs_vproc_little, val);
 }
 
 void aee_rr_rec_cpu_dvfs_oppidx(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(cpu_dvfs_oppidx, val);
 }
 
@@ -839,6 +878,8 @@ u8 aee_rr_curr_cpu_dvfs_oppidx(void)
 
 void aee_rr_rec_cpu_dvfs_status(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(cpu_dvfs_status, val);
 }
 
@@ -849,16 +890,22 @@ u8 aee_rr_curr_cpu_dvfs_status(void)
 
 void aee_rr_rec_gpu_dvfs_vgpu(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(gpu_dvfs_vgpu, val);
 }
 
 void aee_rr_rec_gpu_dvfs_oppidx(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(gpu_dvfs_oppidx, val);
 }
 
 void aee_rr_rec_gpu_dvfs_status(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(gpu_dvfs_status, val);
 }
 
@@ -869,52 +916,74 @@ u8 aee_rr_curr_gpu_dvfs_status(void)
 
 void aee_rr_rec_ptp_cpu_big_volt(u64 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(ptp_cpu_big_volt, val);
 }
 
 void aee_rr_rec_ptp_cpu_little_volt(u64 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(ptp_cpu_little_volt, val);
 }
 
 void aee_rr_rec_ptp_gpu_volt(u64 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(ptp_gpu_volt, val);
 }
 
 void aee_rr_rec_ptp_temp(u64 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(ptp_temp, val);
 }
 
 void aee_rr_rec_ptp_status(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(ptp_status, val);
 }
 
 void aee_rr_rec_thermal_temp1(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(thermal_temp1, val);
 }
 void aee_rr_rec_thermal_temp2(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(thermal_temp2, val);
 }
 void aee_rr_rec_thermal_temp3(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(thermal_temp3, val);
 }
 void aee_rr_rec_thermal_temp4(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(thermal_temp4, val);
 }
 void aee_rr_rec_thermal_temp5(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(thermal_temp5, val);
 }
 
 void aee_rr_rec_thermal_status(u8 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(thermal_status, val);
 }
 
@@ -972,6 +1041,8 @@ u8 aee_rr_curr_thermal_status(void)
 
 void aee_rr_rec_suspend_debug_flag(u32 val)
 {
+    if (!ram_console_init_done)
+        return;
 	LAST_RR_SET(suspend_debug_flag, val);
 }
 
@@ -979,6 +1050,18 @@ void aee_rr_rec_suspend_debug_flag(u32 val)
 int aee_rr_last_fiq_step(void)
 {
 	return LAST_RRR_VAL(fiq_step);
+}
+
+unsigned int aee_rr_last_wdt_status(void)
+{
+	unsigned int wdt_status;
+	struct ram_console_buffer *buffer = ram_console_old;
+	if (buffer->off_pl == 0 || buffer->off_pl + ALIGN(buffer->sz_pl, 64) != buffer->off_lpl) {
+		/* workaround for compatiblity to old preloader & lk (OTA) */
+		wdt_status = *((unsigned char*)buffer + 12);
+	} else
+		wdt_status = LAST_RRPL_VAL(wdt_status);
+	return wdt_status;
 }
 
 typedef void (*last_rr_show_t)(struct seq_file *m);

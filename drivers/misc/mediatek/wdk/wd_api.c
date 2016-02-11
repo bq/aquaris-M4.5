@@ -266,8 +266,10 @@ static int wd_dram_reserved_mode(bool enabled)
 	int ret = 0;
 	if (true == enabled) {
 		mtk_wdt_swsysret_config(0x10000000, 1);
+		mtk_rgu_dram_reserved(1);
 	} else {
 		mtk_wdt_swsysret_config(0x10000000, 0);
+		mtk_rgu_dram_reserved(0);
 	}
 	return ret;
 }

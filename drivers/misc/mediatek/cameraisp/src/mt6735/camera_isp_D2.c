@@ -47,7 +47,7 @@
 #include <linux/wakelock.h>
 #endif
 
-#define LOG_CONSTRAINT_ADJ      (0)
+#define LOG_CONSTRAINT_ADJ      (1)
 #if (LOG_CONSTRAINT_ADJ == 1)
 /* for kernel log reduction */
 #include <linux/printk.h>
@@ -498,7 +498,7 @@ struct wake_lock isp_wake_lock;
 #endif
 
 #if (LOG_CONSTRAINT_ADJ == 1)
-static MBOOL g_log_def_constraint = 100;
+	static MUINT32 g_log_def_constraint;
 #endif
 
 static volatile int g_bWaitLock;
@@ -4595,6 +4595,11 @@ static long ISP_ioctl(struct file *pFile, MUINT32 Cmd, unsigned long Param)
 			    0) {
 				MUINT32 lock_key = _IRQ_MAX;
 
+				if (DebugFlag[1] >= _IRQ_MAX) {
+					LOG_ERR("unsupported module:0x%x\n", DebugFlag[1]);
+					Ret = -EFAULT;
+					break;
+				}
 				if (DebugFlag[1] == _IRQ_D)
 					lock_key = _IRQ;
 				else
@@ -4865,6 +4870,11 @@ static long ISP_ioctl(struct file *pFile, MUINT32 Cmd, unsigned long Param)
 			MUINT32 currentPPB = m_CurrentPPB;
 			MUINT32 lock_key = _IRQ_MAX;
 
+			if (DebugFlag[0] >= _IRQ_MAX) {
+				LOG_ERR("unsupported module:0x%x\n", DebugFlag[0]);
+				Ret = -EFAULT;
+				break;
+			}
 			if (DebugFlag[0] == _IRQ_D)
 				lock_key = _IRQ;
 			else
@@ -5376,10 +5386,10 @@ static MINT32 ISP_open(struct inode *pInode, struct file *pFile)
 		goto EXIT;
 	}
 
-	#if (LOG_CONSTRAINT_ADJ == 1)
-	g_log_def_constraint = detect_count;
-	detect_count = 200;
-	#endif
+#if (LOG_CONSTRAINT_ADJ == 1)
+	g_log_def_constraint = get_detect_count();
+	set_detect_count(g_log_def_constraint+150);
+#endif
 
 	/* default cam 1 */
 	spin_lock_irqsave(&SpinLockCamHaVer, flags);
@@ -5478,10 +5488,6 @@ static MINT32 ISP_release(struct inode *pInode, struct file *pFile)
 		goto EXIT;
 	}
 
-	#if (LOG_CONSTRAINT_ADJ == 1)
-	detect_count = g_log_def_constraint;
-	#endif
-
 	LOG_DBG("Curr UserCount(%d), (process, pid, tgid)=(%s, %d, %d), last user",
 		g_IspInfo.UserCount, current->comm, current->pid, current->tgid);
 
@@ -5513,6 +5519,9 @@ static MINT32 ISP_release(struct inode *pInode, struct file *pFile)
 	ISP_WR32(ISP_ADDR + 0x4200, 0x00000001);
 	/*LOG_DBG("ISP_MCLK1_EN release\n");*/
 
+#if (LOG_CONSTRAINT_ADJ == 1)
+	set_detect_count(g_log_def_constraint);
+#endif
 
 EXIT:
 

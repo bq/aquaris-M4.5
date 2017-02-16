@@ -813,6 +813,7 @@ typedef struct _PARAM_LINUX_NETDEV_STATISTICS_T {
 typedef struct _PARAM_MTK_WIFI_TEST_STRUCT_T {
 	UINT_32 u4FuncIndex;
 	UINT_32 u4FuncData;
+	UINT_32 u4FuncData2; /*FW don't support*/
 } PARAM_MTK_WIFI_TEST_STRUCT_T, *P_PARAM_MTK_WIFI_TEST_STRUCT_T;
 
 /* 802.11 Media stream constraints */
@@ -1713,3 +1714,5 @@ wlanoidNotifyFwSuspend(IN P_ADAPTER_T prAdapter,
 								OUT PUINT_32 pu4SetInfoLen);
 
 #endif /* _WLAN_OID_H */
+WLAN_STATUS wlanoidSetPacketFilter(P_ADAPTER_T prAdapter, UINT_32 u4PacketFilter,
+				BOOLEAN fgIsOid, PVOID pvSetBuffer, UINT_32 u4SetBufferLen);

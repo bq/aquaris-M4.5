@@ -3003,13 +3003,21 @@ P_SW_RFB_T qmHandleRxPackets(IN P_ADAPTER_T prAdapter, IN P_SW_RFB_T prSwRfbList
 			fgIsHTran = TRUE;
 			pucEthDestAddr = prCurrSwRfb->pvHeader;
 
+			if (prCurrSwRfb->prRxStatusGroup4 == NULL) {
+				prCurrSwRfb->eDst = RX_PKT_DESTINATION_NULL;
+				QUEUE_INSERT_TAIL(prReturnedQue, (P_QUE_ENTRY_T) prCurrSwRfb);
+				DBGLOG(RX, WARN, "rxStatusGroup4 for data packet is NULL, drop this packet\n");
+				DBGLOG_MEM8(RX, WARN, (PUINT_8) prRxStatus,
+						prRxStatus->u2RxByteCount > 12 ? prRxStatus->u2RxByteCount:12);
+#if CFG_CHIP_RESET_SUPPORT
+				glResetTrigger(prAdapter);
+#endif
+				continue;
+			}
+
 			if (prCurrSwRfb->prStaRec == NULL) {
 				/* Workaround WTBL Issue */
-				if (prCurrSwRfb->prRxStatusGroup4 == NULL) {
-					DBGLOG_MEM8(SW4, TRACE, (PUINT_8) prCurrSwRfb->prRxStatus,
-						    prCurrSwRfb->prRxStatus->u2RxByteCount);
-					ASSERT(0);
-				}
+
 				HAL_RX_STATUS_GET_TA(prCurrSwRfb->prRxStatusGroup4, aucTaAddr);
 				prCurrSwRfb->ucStaRecIdx = secLookupStaRecIndexFromTA(prAdapter, aucTaAddr);
 				if (prCurrSwRfb->ucStaRecIdx < CFG_NUM_OF_STA_RECORD) {

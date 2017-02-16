@@ -1337,7 +1337,8 @@ typedef struct _WIFI_VAR_T {
 	UINT_8 ucStaBandwidth;
 	UINT_8 ucSta5gBandwidth;
 	UINT_8 ucSta2gBandwidth;
-	UINT_8 ucApBandwidth;
+	UINT_8 ucAp5gBandwidth;
+	UINT_8 ucAp2gBandwidth;
 	UINT_8 ucP2p5gBandwidth;
 	UINT_8 ucP2p2gBandwidth;
 
@@ -1409,6 +1410,7 @@ typedef struct {
 	UINT_16 u2FwProductID;
 	UINT_16 u2FwOwnVersion;
 	UINT_16 u2FwPeerVersion;
+	UINT_32 u2FwOwnVersionExtend; /*support version extended*/
 
 } WIFI_VER_INFO_T, *P_WIFI_VER_INFO_T;
 

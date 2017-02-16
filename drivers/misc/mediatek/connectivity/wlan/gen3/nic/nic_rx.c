@@ -3497,6 +3497,17 @@ VOID nicRxProcessMgmtPacket(IN P_ADAPTER_T prAdapter, IN OUT P_SW_RFB_T prSwRfb)
 	ASSERT(prSwRfb);
 
 	nicRxFillRFB(prAdapter, prSwRfb);
+	if (prSwRfb->prRxStatusGroup3 == NULL) {
+		DBGLOG(RX, WARN, "rxStatusGroup3 for MGMT frame is NULL, drop this packet\n");
+		DBGLOG_MEM8(RX, WARN, (PUINT_8) prSwRfb->prRxStatus,
+			prSwRfb->prRxStatus->u2RxByteCount > 12 ? prSwRfb->prRxStatus->u2RxByteCount:12);
+		nicRxReturnRFB(prAdapter, prSwRfb);
+		RX_INC_CNT(&prAdapter->rRxCtrl, RX_DROP_TOTAL_COUNT);
+#if CFG_CHIP_RESET_SUPPORT
+		glResetTrigger(prAdapter);
+#endif
+		return;
+	}
 
 	ucSubtype = (*(PUINT_8) (prSwRfb->pvHeader) & MASK_FC_SUBTYPE) >> OFFSET_OF_FC_SUBTYPE;
 

@@ -1914,8 +1914,10 @@ wlanoidSetConnect(IN P_ADAPTER_T prAdapter, IN PVOID pvSetBuffer, IN UINT_32 u4S
 	/* Set Connection Request Issued Flag */
 	if (fgIsValidSsid)
 		prConnSettings->fgIsConnReqIssued = TRUE;
-	else
+	else {
+		prConnSettings->eReConnectLevel = RECONNECT_LEVEL_USER_SET;
 		prConnSettings->fgIsConnReqIssued = FALSE;
+	}
 
 	if (fgEqualSsid || fgEqualBssid)
 		prAisAbortMsg->fgDelayIndication = TRUE;
@@ -6405,19 +6407,40 @@ wlanoidSetCurrentPacketFilter(IN P_ADAPTER_T prAdapter,
 		prAdapter->u4OsPacketFilter &= PARAM_PACKET_FILTER_P2P_MASK;
 		prAdapter->u4OsPacketFilter |= u4NewPacketFilter;
 
-		return wlanSendSetQueryCmd(prAdapter,
-					   CMD_ID_SET_RX_FILTER,
-					   TRUE,
-					   FALSE,
-					   TRUE,
-					   nicCmdEventSetCommon,
-					   nicOidCmdTimeoutCommon,
-					   sizeof(UINT_32),
-					   (PUINT_8) &prAdapter->u4OsPacketFilter, pvSetBuffer, u4SetBufferLen);
-	} else {
-		return rStatus;
+		rStatus = wlanoidSetPacketFilter(prAdapter, prAdapter->u4OsPacketFilter,
+					TRUE, pvSetBuffer, u4SetBufferLen);
 	}
+	DBGLOG(REQ, INFO, "[MC debug] u4OsPacketFilter=%x\n", prAdapter->u4OsPacketFilter);
+	return rStatus;
 }				/* wlanoidSetCurrentPacketFilter */
+
+WLAN_STATUS wlanoidSetPacketFilter(P_ADAPTER_T prAdapter, UINT_32 u4PacketFilter,
+				BOOLEAN fgIsOid, PVOID pvSetBuffer, UINT_32 u4SetBufferLen)
+{
+#if CFG_SUPPORT_DROP_MC_PACKET
+	/* Note:
+		If PARAM_PACKET_FILTER_ALL_MULTICAST is set in PacketFilter,
+		Firmware will pass multicast frame.
+		Else if PARAM_PACKET_FILTER_MULTICAST is set in PacketFilter,
+		Firmware will pass some multicast frame in multicast table.
+		Else firmware will drop all multicast frame.
+	*/
+	if (fgIsUnderSuspend)
+		u4PacketFilter &= ~(PARAM_PACKET_FILTER_MULTICAST | PARAM_PACKET_FILTER_ALL_MULTICAST);
+#endif
+
+	DBGLOG(REQ, INFO, "[MC debug] u4PacketFilter=%x, IsSuspend=%d\n", u4PacketFilter, fgIsUnderSuspend);
+	return wlanSendSetQueryCmd(prAdapter,
+						   CMD_ID_SET_RX_FILTER,
+						   TRUE,
+						   FALSE,
+						   fgIsOid,
+						   nicCmdEventSetCommon,
+						   nicOidCmdTimeoutCommon,
+						   sizeof(UINT_32),
+						   (PUINT_8)&u4PacketFilter,
+						   pvSetBuffer, u4SetBufferLen);
+}
 
 /*----------------------------------------------------------------------------*/
 /*!
@@ -6761,6 +6784,7 @@ wlanoidSetDisassociate(IN P_ADAPTER_T prAdapter,
 
 	/* prepare message to AIS */
 	prAdapter->rWifiVar.rConnSettings.fgIsConnReqIssued = FALSE;
+	prAdapter->rWifiVar.rConnSettings.eReConnectLevel = RECONNECT_LEVEL_USER_SET;
 
 	/* Send AIS Abort Message */
 	prAisAbortMsg = (P_MSG_AIS_ABORT_T) cnmMemAlloc(prAdapter, RAM_TYPE_MSG, sizeof(MSG_AIS_ABORT_T));
@@ -7645,12 +7669,11 @@ wlanoidRftestQueryAutoTest(IN P_ADAPTER_T prAdapter,
 		ASSERT(pvQueryBuffer);
 	ASSERT(pu4QueryInfoLen);
 
-	*pu4QueryInfoLen = sizeof(PARAM_MTK_WIFI_TEST_STRUCT_T);
+	/*pu4QueryInfoLen is depended on upper-layer*/
+	*pu4QueryInfoLen = u4QueryBufferLen;
 
-	if (u4QueryBufferLen != sizeof(PARAM_MTK_WIFI_TEST_STRUCT_T)) {
-		DBGLOG(OID, ERROR, "Invalid data. QueryBufferLen: %u.\n", u4QueryBufferLen);
-		return WLAN_STATUS_INVALID_LENGTH;
-	}
+	if (u4QueryBufferLen != sizeof(PARAM_MTK_WIFI_TEST_STRUCT_T))
+		DBGLOG(OID, WARN, "Invalid data. QueryBufferLen: %u.\n", u4QueryBufferLen);
 
 	prRfATInfo = (P_PARAM_MTK_WIFI_TEST_STRUCT_T) pvQueryBuffer;
 	rStatus = rftestQueryATInfo(prAdapter,
@@ -7691,10 +7714,9 @@ wlanoidRftestSetAutoTest(IN P_ADAPTER_T prAdapter,
 
 	*pu4SetInfoLen = sizeof(PARAM_MTK_WIFI_TEST_STRUCT_T);
 
-	if (u4SetBufferLen != sizeof(PARAM_MTK_WIFI_TEST_STRUCT_T)) {
-		DBGLOG(OID, ERROR, "Invalid data. SetBufferLen: %u.\n", u4SetBufferLen);
-		return WLAN_STATUS_INVALID_LENGTH;
-	}
+	if (u4SetBufferLen != sizeof(PARAM_MTK_WIFI_TEST_STRUCT_T))
+		DBGLOG(OID, WARN, "Invalid data. SetBufferLen: %u.\n", u4SetBufferLen);
+
 
 	prRfATInfo = (P_PARAM_MTK_WIFI_TEST_STRUCT_T) pvSetBuffer;
 	rStatus = rftestSetATInfo(prAdapter, prRfATInfo->u4FuncIndex, prRfATInfo->u4FuncData);
@@ -7780,18 +7802,26 @@ rftestQueryATInfo(IN P_ADAPTER_T prAdapter,
 
 		prTestStatus->rATInfo.u4FuncData =
 		    (prAdapter->rVerInfo.u2FwProductID << 16) | (prAdapter->rVerInfo.u2FwOwnVersion);
-		u4QueryBufferLen = sizeof(EVENT_TEST_STATUS);
+		if (u4QueryBufferLen > 8) {
+			/*support FW version extended*/
+			prTestStatus->rATInfo.u4FuncData2 = prAdapter->rVerInfo.u2FwOwnVersionExtend;
+
+			DBGLOG(OID, INFO, "<wifi> version: 0x%x ,extended : 0x%x\n"
+				, prTestStatus->rATInfo.u4FuncData
+				, prTestStatus->rATInfo.u4FuncData2);
+		} else
+			DBGLOG(OID, INFO, "<wifi> version: 0x%x\n"
+				, prTestStatus->rATInfo.u4FuncData);
 
 		return WLAN_STATUS_SUCCESS;
 	} else if (u4FuncIndex == RF_AT_FUNCID_DRV_INFO) {
 		/* driver implementation */
 		prTestStatus = (P_EVENT_TEST_STATUS) pvQueryBuffer;
-
 		prTestStatus->rATInfo.u4FuncData = CFG_DRV_OWN_VERSION;
-		u4QueryBufferLen = sizeof(EVENT_TEST_STATUS);
 
 		return WLAN_STATUS_SUCCESS;
 	}
+
 	prCmdInfo = cmdBufAllocateCmdInfo(prAdapter, (CMD_HDR_SIZE + sizeof(CMD_TEST_CTRL_T)));
 
 	if (!prCmdInfo) {

@@ -1845,9 +1845,6 @@ WLAN_STATUS wlanAdapterStop(IN P_ADAPTER_T prAdapter)
 
 	ASSERT(prAdapter);
 
-	/* MGMT - unitialization */
-	nicUninitMGMT(prAdapter);
-
 	/* Release all CMD/MGMT/SEC frame in command queue */
 	kalClearCommandQueue(prAdapter->prGlueInfo);
 
@@ -1927,6 +1924,9 @@ WLAN_STATUS wlanAdapterStop(IN P_ADAPTER_T prAdapter)
 	nicRxUninitialize(prAdapter);
 
 	nicTxRelease(prAdapter, FALSE);
+
+	/* MGMT - unitialization */
+	nicUninitMGMT(prAdapter);
 
 	/* System Service Uninitialization */
 	nicUninitSystemService(prAdapter);
@@ -4575,6 +4575,14 @@ WLAN_STATUS wlanQueryNicCapability(IN P_ADAPTER_T prAdapter)
 	prAdapter->rVerInfo.u2FwProductID = prEventNicCapability->u2ProductID;
 	prAdapter->rVerInfo.u2FwOwnVersion = prEventNicCapability->u2FwVersion;
 	prAdapter->rVerInfo.u2FwPeerVersion = prEventNicCapability->u2DriverVersion;
+	/*support FW version extend*/
+
+	prAdapter->rVerInfo.u2FwOwnVersionExtend =
+		(prEventNicCapability->aucReserved0[0] << 24)
+		| (prEventNicCapability->aucReserved0[1] << 16)
+		| (prEventNicCapability->aucReserved0[2] << 8)
+		| (prEventNicCapability->aucReserved0[3]);
+
 	prAdapter->fgIsHw5GBandDisabled = (BOOLEAN) prEventNicCapability->ucHw5GBandDisabled;
 	prAdapter->fgIsEepromUsed = (BOOLEAN) prEventNicCapability->ucEepromUsed;
 	prAdapter->fgIsEmbbededMacAddrValid = (BOOLEAN)
@@ -4929,9 +4937,9 @@ WLAN_STATUS wlanLoadManufactureData(IN P_ADAPTER_T prAdapter, IN P_REG_INFO_T pr
 	prAdapter->rWifiVar.rConnSettings.u2CountryCode =
 	    (((UINT_16) prRegInfo->au2CountryCode[0]) << 8) | (((UINT_16) prRegInfo->au2CountryCode[1]) & BITS(0, 7));
 
-#if 0				/* Bandwidth control will be controlled by GUI. 20110930
-				 * So ignore the setting from registry/NVRAM
-				 */
+#if 0  /* Bandwidth control will be controlled by GUI. 20110930
+	* So ignore the setting from registry/NVRAM
+	*/
 	prAdapter->rWifiVar.rConnSettings.uc2G4BandwidthMode =
 	    prRegInfo->uc2G4BwFixed20M ? CONFIG_BW_20M : CONFIG_BW_20_40M;
 	prAdapter->rWifiVar.rConnSettings.uc5GBandwidthMode =
@@ -4940,6 +4948,8 @@ WLAN_STATUS wlanLoadManufactureData(IN P_ADAPTER_T prAdapter, IN P_REG_INFO_T pr
 
 	/* 6. Set domain and channel information to chip */
 	rlmDomainSendCmd(prAdapter, FALSE);
+	/* Update supported channel list in channel table */
+	wlanUpdateChannelTable(prAdapter->prGlueInfo);
 
 	/* 7. set band edge tx power if available */
 	if (prRegInfo->fg2G4BandEdgePwrUsed) {
@@ -6098,9 +6108,10 @@ VOID wlanInitFeatureOption(IN P_ADAPTER_T prAdapter)
 	prWifiVar->ucStaBandwidth = (UINT_8) wlanCfgGetUint32(prAdapter, "StaBw", MAX_BW_80MHZ);
 	prWifiVar->ucSta2gBandwidth = (UINT_8) wlanCfgGetUint32(prAdapter, "Sta2gBw", MAX_BW_40MHZ);
 	prWifiVar->ucSta5gBandwidth = (UINT_8) wlanCfgGetUint32(prAdapter, "Sta5gBw", MAX_BW_80MHZ);
+	prWifiVar->ucAp2gBandwidth = (UINT_8) wlanCfgGetUint32(prAdapter, "Ap2gBw", MAX_BW_20MHZ);
+	prWifiVar->ucAp5gBandwidth = (UINT_8) wlanCfgGetUint32(prAdapter, "Ap5gBw", MAX_BW_40MHZ);
 	prWifiVar->ucP2p2gBandwidth = (UINT_8) wlanCfgGetUint32(prAdapter, "P2p2gBw", MAX_BW_40MHZ);
 	prWifiVar->ucP2p5gBandwidth = (UINT_8) wlanCfgGetUint32(prAdapter, "P2p5gBw", MAX_BW_40MHZ);
-	prWifiVar->ucApBandwidth = (UINT_8) wlanCfgGetUint32(prAdapter, "ApBw", MAX_BW_20MHZ);
 
 	prWifiVar->ucStaDisconnectDetectTh = (UINT_8) wlanCfgGetUint32(prAdapter, "StaDisconnectDetectTh", 0);
 	prWifiVar->ucApDisconnectDetectTh = (UINT_8) wlanCfgGetUint32(prAdapter, "ApDisconnectDetectTh", 0);
@@ -6367,12 +6378,12 @@ VOID wlanCfgSetCountryCode(IN P_ADAPTER_T prAdapter)
 		prAdapter->rWifiVar.rConnSettings.u2CountryCode =
 		    (((UINT_16) aucValue[0]) << 8) | ((UINT_16) aucValue[1]);
 
-		prAdapter->prDomainInfo = NULL;	/* Force to re-search country code */
+		/* Force to re-search country code in country domains */
+		prAdapter->prDomainInfo = NULL;
 		rlmDomainSendCmd(prAdapter, TRUE);
 
-		/* Update supported channel list for WLAN & P2P interface (wiphy->bands) */
+		/* Update supported channel list in channel table based on current country domain */
 		wlanUpdateChannelTable(prAdapter->prGlueInfo);
-		p2pUpdateChannelTableByDomain(prAdapter->prGlueInfo);
 	}
 }
 

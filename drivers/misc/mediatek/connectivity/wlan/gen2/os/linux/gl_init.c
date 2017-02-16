@@ -1952,6 +1952,8 @@ int wlanHardStartXmit(struct sk_buff *prSkb, struct net_device *prDev)
 	DBGLOG(TX, EVENT, "\n+++++ pending frame %d len = %d +++++\n", prGlueInfo->i4TxPendingFrameNum, prSkb->len);
 	prGlueInfo->rNetDevStats.tx_bytes += prSkb->len;
 	prGlueInfo->rNetDevStats.tx_packets++;
+	if (netif_carrier_ok(prDev))
+		kalPerMonStart(prGlueInfo);
 
 	/* set GLUE_FLAG_TXREQ_BIT */
 
@@ -2487,6 +2489,10 @@ void wlanHandleSystemSuspend(void)
 #endif
 	UINT_32 i;
 	P_PARAM_NETWORK_ADDRESS_IP prParamIpAddr;
+#if CFG_SUPPORT_DROP_MC_PACKET
+	UINT_32 u4PacketFilter = 0;
+	UINT_32 u4SetInfoLen = 0;
+#endif
 
 	/* <1> Sanity check and acquire the net_device */
 	ASSERT(u4WlanDevNum <= CFG_MAX_WLAN_DEVICES);
@@ -2500,6 +2506,18 @@ void wlanHandleSystemSuspend(void)
 	prGlueInfo = *((P_GLUE_INFO_T *) netdev_priv(prDev));
 	ASSERT(prGlueInfo);
 
+#if CFG_SUPPORT_DROP_MC_PACKET
+	/* new filter should not include p2p mask */
+#if CFG_ENABLE_WIFI_DIRECT_CFG_80211
+	u4PacketFilter = prGlueInfo->prAdapter->u4OsPacketFilter & (~PARAM_PACKET_FILTER_P2P_MASK);
+#endif
+	if (kalIoctl(prGlueInfo,
+		 wlanoidSetCurrentPacketFilter,
+		 &u4PacketFilter,
+		 sizeof(u4PacketFilter), FALSE, FALSE, TRUE, FALSE, &u4SetInfoLen) != WLAN_STATUS_SUCCESS) {
+		DBGLOG(INIT, ERROR, "set packet filter failed.\n");
+	}
+#endif
 	if (!prDev || !(prDev->ip_ptr) ||
 	    !((struct in_device *)(prDev->ip_ptr))->ifa_list ||
 	    !(&(((struct in_device *)(prDev->ip_ptr))->ifa_list->ifa_local))) {
@@ -2583,6 +2601,10 @@ void wlanHandleSystemResume(void)
 #endif
 	EVENT_AIS_BSS_INFO_T rParam;
 	UINT_32 u4BufLen = 0;
+#if CFG_SUPPORT_DROP_MC_PACKET
+	UINT_32 u4PacketFilter = 0;
+	UINT_32 u4SetInfoLen = 0;
+#endif
 
 	/* <1> Sanity check and acquire the net_device */
 	ASSERT(u4WlanDevNum <= CFG_MAX_WLAN_DEVICES);
@@ -2603,6 +2625,18 @@ void wlanHandleSystemResume(void)
 	prGlueInfo = *((P_GLUE_INFO_T *) netdev_priv(prDev));
 	ASSERT(prGlueInfo);
 
+#if CFG_SUPPORT_DROP_MC_PACKET
+	/* new filter should not include p2p mask */
+#if CFG_ENABLE_WIFI_DIRECT_CFG_80211
+	u4PacketFilter = prGlueInfo->prAdapter->u4OsPacketFilter & (~PARAM_PACKET_FILTER_P2P_MASK);
+#endif
+	if (kalIoctl(prGlueInfo,
+		 wlanoidSetCurrentPacketFilter,
+		 &u4PacketFilter,
+		 sizeof(u4PacketFilter), FALSE, FALSE, TRUE, FALSE, &u4SetInfoLen) != WLAN_STATUS_SUCCESS) {
+		DBGLOG(INIT, ERROR, "set packet filter failed.\n");
+	}
+#endif
 	/*
 	   We will receive the event in rx, we will check if the status is the same in driver
 	   and FW, if not the same, trigger disconnetion procedure.
@@ -3155,6 +3189,8 @@ bailout:
 	}
 #endif
 	if (i4Status == WLAN_STATUS_SUCCESS) {
+		/*Init performance monitor structure */
+		kalPerMonInit(prGlueInfo);
 		/* probe ok */
 		DBGLOG(INIT, TRACE, "wlanProbe ok\n");
 	} else {
@@ -3212,6 +3248,13 @@ static VOID wlanRemove(VOID)
 		free_netdev(prDev);
 		return;
 	}
+
+	kalPerMonDestroy(prGlueInfo);
+	/* 4 <3> Remove /proc filesystem. */
+#ifdef WLAN_INCLUDE_PROC
+	procRemoveProcfs();
+#endif /* WLAN_INCLUDE_PROC */
+
 #if CFG_ENABLE_WIFI_DIRECT
 	/* avoid remove & p2p off command simultaneously */
 	{
@@ -3295,11 +3338,6 @@ static VOID wlanRemove(VOID)
 	if (prGlueInfo->rBowInfo.fgIsRegistered)
 		glUnregisterAmpc(prGlueInfo);
 #endif
-
-	/* 4 <3> Remove /proc filesystem. */
-#ifdef WLAN_INCLUDE_PROC
-	procRemoveProcfs();
-#endif /* WLAN_INCLUDE_PROC */
 
 #if (CFG_SUPPORT_MET_PROFILING == 1)
 	kalMetRemoveProcfs();
@@ -3393,6 +3431,9 @@ static int initWlan(void)
 	/* register set_dbg_level handler to mtk_wmt_wifi */
 	register_set_dbg_level_handler(set_dbg_level_handler);
 
+	/* Register framebuffer notifier client*/
+	kalFbNotifierReg((P_GLUE_INFO_T) wiphy_priv(gprWdev->wiphy));
+
 	/* Set the initial DEBUG CLASS of each module */
 	return ret;
 }				/* end of initWlan() */
@@ -3410,6 +3451,9 @@ static int initWlan(void)
 static VOID exitWlan(void)
 {
 	DBGLOG(INIT, INFO, "exitWlan\n");
+
+	/* Unregister framebuffer notifier client*/
+	kalFbNotifierUnReg();
 
 	/* unregister set_dbg_level handler to mtk_wmt_wifi */
 	register_set_dbg_level_handler(NULL);

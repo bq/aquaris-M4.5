@@ -139,7 +139,9 @@ void c2k_reset_modem(void)
 	spin_unlock_irqrestore(&cmdata->modem->status_lock, flags);
 
 	atomic_set(&cmdata->modem->tx_fifo_cnt, TX_FIFO_SZ);
-	wake_up(&cmdata->modem->wait_tx_done_q);
+	wake_up_all(&cmdata->modem->wait_tx_done_q);
+
+	modem_pre_stop();
 
 	c2k_wake_host(0);
 
@@ -207,7 +209,9 @@ void c2k_power_off_modem(void)
 	spin_unlock_irqrestore(&cmdata->modem->status_lock, flags);
 
 	atomic_set(&cmdata->modem->tx_fifo_cnt, TX_FIFO_SZ);
-	wake_up(&cmdata->modem->wait_tx_done_q);
+	wake_up_all(&cmdata->modem->wait_tx_done_q);
+
+	modem_pre_stop();
 
 	c2k_wake_host(0);
 	c2k_modem_power_off_platform();
@@ -537,6 +541,9 @@ static int modem_wdt_notify_misc(struct notifier_block *nb, unsigned long event,
 	case MDM_EVT_NOTIFY_WDT:
 		pr_debug("%s %d ASC_USER_MDM_WDT\n", __func__, __LINE__);
 		modem_signal_user(ASC_USER_MDM_WDT);
+#ifdef CONFIG_MTK_SVLTE_SUPPORT
+		exec_ccci_kern_func_by_md_id(0, ID_RESET_MD, NULL, 0);
+#endif
 		break;
 	default:
 		break;
@@ -600,7 +607,7 @@ static struct attribute_group g_attr_group = {
 
 static void modem_shutdown(struct platform_device *dev)
 {
-	c2k_power_off_modem();
+	/*c2k_power_off_modem();*/
 }
 
 /*

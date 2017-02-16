@@ -252,6 +252,10 @@ static ssize_t freqhopping_userdefine_proc_write(struct file *file, const char *
 	fh_ctl.ssc_setting.dds = p7;
 	/* fh_ctl.ssc_setting.freq = 0; */
 
+	/* Check validity of PLL ID */
+	if (fh_ctl.pll_id >= FH_PLL_COUNT)
+		return -1;
+
 
 	if (p1 == FH_CMD_ENABLE) {
 		ret = mt_fh_enable_usrdef(&fh_ctl);
@@ -332,6 +336,11 @@ static ssize_t freqhopping_status_proc_write(struct file *file, const char *buff
 	fh_ctl.ssc_setting.upbnd = 0;
 	fh_ctl.ssc_setting.lowbnd = 0;
 
+	/* Check validity of PLL ID */
+	if (fh_ctl.pll_id >= FH_PLL_COUNT)
+		return -1;
+
+
 	if (p1 == 0)
 		mt_freqhopping_ioctl(NULL, FH_CMD_DISABLE, (unsigned long)(&fh_ctl));
 	else
@@ -388,6 +397,11 @@ static ssize_t freqhopping_debug_proc_write(struct file *file, const char *buffe
 	fh_ctl.ssc_setting.upbnd = p6;
 	fh_ctl.ssc_setting.lowbnd = p7;
 	/* fh_ctl.ssc_setting.freq = 0; */
+
+	/* Check validity of PLL ID */
+	if (fh_ctl.pll_id >= FH_PLL_COUNT)
+		return -1;
+
 
 	if (cmd < FH_CMD_INTERNAL_MAX_CMD)
 		mt_freqhopping_ioctl(NULL, cmd, (unsigned long)(&fh_ctl));

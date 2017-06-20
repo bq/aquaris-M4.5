@@ -56,9 +56,6 @@ int Enable_FGADC_LOG = 0;
 /* ============================================================ // */
 BATTERY_METER_CONTROL battery_meter_ctrl = NULL;
 
-/* static struct proc_dir_entry *proc_entry_fgadc; */
-static char proc_fgadc_data[32];
-
 kal_bool gFG_Is_Charging = KAL_FALSE;
 signed int g_auxadc_solution = 0;
 unsigned int g_spm_timer = 600;
@@ -2264,7 +2261,8 @@ void oam_run(void)
 	signed int delta_time = 0;
 
 	/* now_time = rtc_read_hw_time(); */
-	get_monotonic_boottime(&now_time);
+	/*get_monotonic_boottime(&now_time);*/	/*This api includes suspend_time*/
+	getrawmonotonic(&now_time);		/*This api does NOT include suspend_time*/
 
 	/* delta_time = now_time - last_oam_run_time; */
 	delta_time = now_time.tv_sec - last_oam_run_time.tv_sec;
@@ -3045,6 +3043,7 @@ void fgauge_algo_run_init(void)
 unsigned char reset_fg_bat_int = KAL_TRUE;
 void fg_bat_int_handler(void)
 {
+	bm_print(BM_LOG_CRTI, "[fg_bat_int_handler] Detect\n");
 	reset_fg_bat_int = KAL_TRUE;
 	wake_up_bat2();
 }
@@ -3103,8 +3102,9 @@ void fgauge_initialization(void)
 		 gFG_voltage, gFG_current, gFG_columb, gFG_temp, gFG_capacity, gFG_BATT_CAPACITY);
 
 #if defined(FG_BAT_INT)
-	/*pmic_register_interrupt_callback(41, fg_bat_int_handler);*/
-	/*pmic_register_interrupt_callback(40, fg_bat_int_handler);*/
+	pmic_register_interrupt_callback(41, fg_bat_int_handler);
+	pmic_register_interrupt_callback(40, fg_bat_int_handler);
+	bm_print(BM_LOG_CRTI, "[fgauge_initialization] fg_bat_int_handler register\n");
 #endif
 #endif
 }
@@ -3493,7 +3493,7 @@ signed int battery_meter_trans_battery_percentage(kal_bool d_val)
 #if defined(FG_BAT_INT)
 signed int battery_meter_set_columb_interrupt(unsigned int val)
 {
-	battery_log(BAT_LOG_FULL, "battery_meter_set_columb_interrupt=%d\n", val);
+	battery_log(BAT_LOG_CRTI, "battery_meter_set_columb_interrupt=%d\n", val);
 	battery_meter_ctrl(BATTERY_METER_CMD_SET_COLUMB_INTERRUPT, &val);
 	return 0;
 }
@@ -3768,15 +3768,17 @@ signed int battery_meter_get_VSense(void)
 static ssize_t fgadc_log_write(struct file *filp, const char __user *buff,
 			       size_t len, loff_t *data)
 {
-	if (copy_from_user(&proc_fgadc_data, buff, len)) {
+	char proc_fgadc_data;
+
+	if ((len <= 0) || copy_from_user(&proc_fgadc_data, buff, 1)) {
 		bm_print(BM_LOG_CRTI, "fgadc_log_write error.\n");
 		return -EFAULT;
 	}
 
-	if (proc_fgadc_data[0] == '1') {
+	if (proc_fgadc_data == '1') {
 		bm_print(BM_LOG_CRTI, "enable FGADC driver log system\n");
 		Enable_FGADC_LOG = BM_LOG_CRTI;
-	} else if (proc_fgadc_data[0] == '2') {
+	} else if (proc_fgadc_data == '2') {
 		bm_print(BM_LOG_CRTI, "enable FGADC driver log system:2\n");
 		Enable_FGADC_LOG = BM_LOG_FULL;
 	} else {
@@ -4439,6 +4441,7 @@ static int battery_meter_suspend(struct platform_device *dev, pm_message_t state
 		battery_meter_ctrl(BATTERY_METER_CMD_GET_HW_OCV, &g_hw_ocv_before_sleep);
 	}
 #endif
+
 	bm_print(BM_LOG_CRTI, "[battery_meter_suspend]\n");
 	return 0;
 }
@@ -4693,7 +4696,7 @@ static int battery_meter_resume(struct platform_device *dev)
 #if defined(FG_BAT_INT)
 #if defined(CONFIG_POWER_EXT)
 #elif defined(SOC_BY_HW_FG)
-	battery_meter_set_columb_interrupt(0);
+	/*battery_meter_set_columb_interrupt(0);*/
 #endif
 #endif				/* #if defined(FG_BAT_INT) */
 

@@ -96,12 +96,18 @@ static long ged_dispatch(GED_BRIDGE_PACKAGE *psBridgePackageKM)
     void *pvInt, *pvOut;
     typedef int (ged_bridge_func_type)(void*, void*);
     ged_bridge_func_type* pFunc = NULL;
-    
-    if ((psBridgePackageKM->i32InBufferSize >=0) && (psBridgePackageKM->i32OutBufferSize >=0) &&
-        (psBridgePackageKM->i32InBufferSize + psBridgePackageKM->i32OutBufferSize < GED_IOCTL_PARAM_BUF_SIZE))
-    {
-        pvInt = gvIOCTLParamBuf;
-        pvOut = (void*)((char*)pvInt + (uintptr_t)psBridgePackageKM->i32InBufferSize);
+
+	/* We make sure the both size and the sum of them are GE 0 integer.
+	 * The sum will not overflow to zero, because we will get zero from two GE 0 integers
+	 * if and only if they are both zero in a 2's complement numeral system.
+	 * That is: if overflow happen, the sum will be a negative number.
+	 */
+	if (psBridgePackageKM->i32InBufferSize >= 0 && psBridgePackageKM->i32OutBufferSize >= 0
+		&& psBridgePackageKM->i32InBufferSize + psBridgePackageKM->i32OutBufferSize >= 0
+		&& psBridgePackageKM->i32InBufferSize + psBridgePackageKM->i32OutBufferSize
+		< GED_IOCTL_PARAM_BUF_SIZE) {
+		pvInt = gvIOCTLParamBuf;
+		pvOut = (void *)((char *)pvInt + (uintptr_t)psBridgePackageKM->i32InBufferSize);
         if (psBridgePackageKM->i32InBufferSize > 0)
         {
             if (0 != ged_copy_from_user(pvInt, psBridgePackageKM->pvParamIn, psBridgePackageKM->i32InBufferSize))
@@ -141,6 +147,9 @@ static long ged_dispatch(GED_BRIDGE_PACKAGE *psBridgePackageKM)
         case GED_BRIDGE_COMMAND_DVFS_UM_RETURN:
             pFunc = (ged_bridge_func_type*)ged_bridge_dvfs_um_retrun;
             break;
+			case GED_BRIDGE_COMMAND_EVENT_NOTIFY:
+				pFunc = (ged_bridge_func_type*)ged_bridge_event_notify;
+				break;
         default:
             GED_LOGE("Unknown Bridge ID: %u\n", GED_GET_BRIDGE_ID(psBridgePackageKM->ui32FunctionID));
             break;

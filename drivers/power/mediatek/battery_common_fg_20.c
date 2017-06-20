@@ -89,8 +89,6 @@
 /* Battery Logging Entry */
 /* ////////////////////////////////////////////////////////////////////////////// */
 int Enable_BATDRV_LOG = BAT_LOG_CRTI;
-/* static struct proc_dir_entry *proc_entry; */
-char proc_bat_data[32];
 
 /* ///////////////////////////////////////////////////////////////////////////////////////// */
 /* // Smart Battery Structure */
@@ -456,15 +454,17 @@ EXPORT_SYMBOL(wake_up_bat3);
 
 static ssize_t bat_log_write(struct file *filp, const char __user *buff, size_t len, loff_t *data)
 {
-	if (copy_from_user(&proc_bat_data, buff, len)) {
+	char proc_bat_data;
+
+	if ((len <= 0) || copy_from_user(&proc_bat_data, buff, 1)) {
 		battery_log(BAT_LOG_FULL, "bat_log_write error.\n");
 		return -EFAULT;
 	}
 
-	if (proc_bat_data[0] == '1') {
+	if (proc_bat_data == '1') {
 		battery_log(BAT_LOG_CRTI, "enable battery driver log system\n");
 		Enable_BATDRV_LOG = 1;
-	} else if (proc_bat_data[0] == '2') {
+	} else if (proc_bat_data == '2') {
 		battery_log(BAT_LOG_CRTI, "enable battery driver log system:2\n");
 		Enable_BATDRV_LOG = 2;
 	} else {
@@ -715,6 +715,11 @@ static struct battery_data battery_main = {
 #endif
 };
 
+void mt_battery_set_init_vol(int init_voltage)
+{
+	BMT_status.bat_vol = init_voltage;
+	battery_main.BAT_batt_vol = init_voltage;
+}
 
 #if !defined(CONFIG_POWER_EXT)
 /* ///////////////////////////////////////////////////////////////////////////////////////// */
@@ -1686,12 +1691,13 @@ static void battery_update(struct battery_data *bat_data)
 
 		if (dlpt_check_power_off() == 1) {
 			bat_data->BAT_CAPACITY = 0;
+			BMT_status.UI_SOC2 = 0;
 			cnt++;
 			battery_log(BAT_LOG_CRTI,
 				    "[DLPT_POWER_OFF_EN] SOC=%d to power off , cnt=%d\n",
 				    bat_data->BAT_CAPACITY, cnt);
 
-			if (cnt >= 2)
+			if (cnt >= 4)
 				kernel_restart("DLPT reboot system");
 
 		} else {
@@ -1721,6 +1727,7 @@ void update_charger_info(int wireless_state)
 
 static void wireless_update(struct wireless_data *wireless_data)
 {
+	static int wireless_status = -1;
 	struct power_supply *wireless_psy = &wireless_data->psy;
 
 	if (BMT_status.charger_exist == KAL_TRUE || g_wireless_state) {
@@ -1734,11 +1741,15 @@ static void wireless_update(struct wireless_data *wireless_data)
 		wireless_data->WIRELESS_ONLINE = 0;
 	}
 
-	power_supply_changed(wireless_psy);
+	if (wireless_status != wireless_data->WIRELESS_ONLINE) {
+		wireless_status = wireless_data->WIRELESS_ONLINE;
+		power_supply_changed(wireless_psy);
+	}
 }
 
 static void ac_update(struct ac_data *ac_data)
 {
+	static int ac_status = -1;
 	struct power_supply *ac_psy = &ac_data->psy;
 
 	if (BMT_status.charger_exist == KAL_TRUE) {
@@ -1765,11 +1776,15 @@ static void ac_update(struct ac_data *ac_data)
 		ac_data->AC_ONLINE = 0;
 	}
 
-	power_supply_changed(ac_psy);
+	if (ac_status != ac_data->AC_ONLINE) {
+		ac_status = ac_data->AC_ONLINE;
+		power_supply_changed(ac_psy);
+	}
 }
 
 static void usb_update(struct usb_data *usb_data)
 {
+	static int usb_status = -1;
 	struct power_supply *usb_psy = &usb_data->psy;
 
 	if (BMT_status.charger_exist == KAL_TRUE) {
@@ -1784,7 +1799,10 @@ static void usb_update(struct usb_data *usb_data)
 		usb_data->USB_ONLINE = 0;
 	}
 
-	power_supply_changed(usb_psy);
+	if (usb_status != usb_data->USB_ONLINE) {
+		usb_status = usb_data->USB_ONLINE;
+		power_supply_changed(usb_psy);
+	}
 }
 
 #endif
@@ -1834,6 +1852,12 @@ kal_bool bat_is_charging_full(void)
 
 unsigned int bat_get_ui_percentage(void)
 {
+	if ((g_platform_boot_mode == META_BOOT) ||
+		(g_platform_boot_mode == ADVMETA_BOOT) ||
+		(g_platform_boot_mode == FACTORY_BOOT) ||
+		(g_platform_boot_mode == ATE_FACTORY_BOOT))
+		return 75;
+
 	return BMT_status.UI_SOC2;
 }
 
@@ -2073,9 +2097,10 @@ void mt_battery_GetBatteryData(void)
 		batteryIndex = 0;
 
 	battery_log(BAT_LOG_CRTI,
-		    "[kernel]AvgVbat %d,bat_vol %d, AvgI %d, I %d, VChr %d, AvgT %d, T %d, ZCV %d\n",
+		    "[kernel]AvgVbat %d,bat_vol %d, AvgI %d, I %d, VChr %d, AvgT %d, T %d, ZCV %d, CHR_Type %d, SOC %3d:%3d:%3d\n",
 		    BMT_status.bat_vol, bat_vol, BMT_status.ICharging, ICharging,
-		    BMT_status.charger_vol, BMT_status.temperature, temperature, BMT_status.ZCV);
+		    BMT_status.charger_vol, BMT_status.temperature, temperature, BMT_status.ZCV,
+		    BMT_status.charger_type, BMT_status.SOC, BMT_status.UI_SOC, BMT_status.UI_SOC2);
 }
 
 
@@ -2796,6 +2821,7 @@ void BAT_thread(void)
 		mt_battery_charging_algorithm();
 	}
 	mt_kpoc_power_off_check();
+	battery_meter_set_fg_int();
 }
 
 /* ///////////////////////////////////////////////////////////////////////////////////////// */
@@ -2862,6 +2888,9 @@ int bat_update_thread(void *x)
 	/* Run on a process content */
 	while (1) {
 		mutex_lock(&bat_update_mutex);
+#ifdef USING_SMOOTH_UI_SOC2
+		battery_meter_smooth_uisoc2();
+#endif
 		mt_battery_update_status();
 		mutex_unlock(&bat_update_mutex);
 

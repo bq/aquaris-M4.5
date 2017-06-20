@@ -179,14 +179,6 @@ static s32 i2c_set_speed(struct mt_i2c_t *i2c)
 	/* I2CLOG("i2c_set_speed=================\n"); */
 	/* compare the current speed with the latest mode */
 
-	if ((i2c->speed == i2c->last_speed) && (i2c->mode == i2c->last_mode)) {
-		/* I2CLOG(  " i2c_set_speed,i2c->speed=%d, i2c->last_speed=%d,
-			i2c->timing_reg =0x%x\n",i2c->speed, i2c->last_speed,i2c->timing_reg); */
-		/* I2CLOG(  " i2c_set_speed,i2c->mode=%d, i2c->last_mode=%d,
-			high_speed_reg =0x%x\n",i2c->mode, i2c->last_mode,i2c->high_speed_reg); */
-		ret = 0;
-		goto end;
-	}
 
 	mode = i2c->mode;
 	khz = i2c->speed;
@@ -1306,7 +1298,7 @@ int i2c_tui_enable_clock(void)
 	enable_clock(MT_CG_PERI_APDMA, "i2c");
 #else
 	struct i2c_adapter *adap;
-	struct mt_i2c *i2c;
+	struct mt_i2c_t *i2c;
 
 	adap = i2c_get_adapter(1);
 	if (!adap) {
@@ -1329,7 +1321,7 @@ int i2c_tui_disable_clock(void)
 	disable_clock(MT_CG_PERI_APDMA, "i2c");
 #else
 	struct i2c_adapter *adap;
-	struct mt_i2c *i2c;
+	struct mt_i2c_t *i2c;
 
 	adap = i2c_get_adapter(1);
 	if (!adap) {

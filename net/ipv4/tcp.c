@@ -304,6 +304,9 @@ EXPORT_SYMBOL(sysctl_tcp_wmem);
 atomic_long_t tcp_memory_allocated;	/* Current allocated memory. */
 EXPORT_SYMBOL(tcp_memory_allocated);
 
+int sysctl_tcp_ack_number __read_mostly = 1;
+EXPORT_SYMBOL(sysctl_tcp_ack_number);
+
 /*
  * Current number of TCP sockets.
  */
@@ -793,6 +796,12 @@ ssize_t tcp_splice_read(struct socket *sock, loff_t *ppos,
 				ret = -EAGAIN;
 				break;
 			}
+			/* if __tcp_splice_read() got nothing while we have
+			 * an skb in receive queue, we do not want to loop.
+			 * This might happen with URG data.
+			 */
+			if (!skb_queue_empty(&sk->sk_receive_queue))
+				break;
 			sk_wait_data(sk, &timeo);
 			if (signal_pending(current)) {
 				ret = sock_intr_errno(timeo);
@@ -1432,7 +1441,7 @@ static void tcp_cleanup_rbuf(struct sock *sk, int copied)
 		    * receive. */
 		if (icsk->icsk_ack.blocked ||
 		    /* Once-per-two-segments ACK was not sent by tcp_input.c */
-		    tp->rcv_nxt - tp->rcv_wup > icsk->icsk_ack.rcv_mss ||
+		    tp->rcv_nxt - tp->rcv_wup > sysctl_tcp_ack_number * icsk->icsk_ack.rcv_mss ||
 		    /*
 		     * If this read emptied read buffer, we send ACK, if
 		     * connection is not bidirectional, user drained
@@ -3248,14 +3257,15 @@ restart:
 			sock_hold(sk);
 			spin_unlock_bh(lock);
 
-			local_bh_disable();
-			bh_lock_sock(sk);
+			lock_sock(sk);
 			sk->sk_err = ETIMEDOUT;
 			sk->sk_error_report(sk);
 
+			local_bh_disable();
 			tcp_done(sk);
-			bh_unlock_sock(sk);
 			local_bh_enable();
+
+			release_sock(sk);
 			sock_put(sk);
 
 			goto restart;
